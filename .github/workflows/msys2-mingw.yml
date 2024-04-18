@@ -36,8 +36,11 @@ jobs:
           update: true
           install: >-
             base-devel
-            mingw-w64-x86_64-toolchain
-            mingw-w64-x86_64-perl
+            gcc
+            libopenssl
+            openssl-devel
+            perl
+            perl-devel
       - name: perl -V
         run: |
           perl -V
