@@ -73,6 +73,7 @@ my %WriteMakefileArgs = (
     "Crypt::OpenSSL::Guess" => "0.11",
     "Crypt::OpenSSL::PKCS10" => 0,
     "Data::Dumper" => 0,
+    "Digest::SHA" => 0,
     "File::Spec::Functions" => 0,
     "Test::More" => 0
   },
@@ -91,6 +92,7 @@ my %FallbackPrereqs = (
   "Crypt::OpenSSL::Guess" => "0.11",
   "Crypt::OpenSSL::PKCS10" => 0,
   "Data::Dumper" => 0,
+  "Digest::SHA" => 0,
   "File::Spec::Functions" => 0,
   "Test::More" => 0
 );
