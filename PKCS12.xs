@@ -26,14 +26,16 @@
 #endif
 
 const EVP_CIPHER *enc;
-int dump_certs_pkeys_bags(BIO *out, const STACK_OF(PKCS12_SAFEBAG) *bags,
+int dump_certs_pkeys_bags(pTHX_ BIO *out, const STACK_OF(PKCS12_SAFEBAG) *bags,
                            const char *pass, int passlen, int options,
-                           char *pempass, const EVP_CIPHER *enc);
-static int alg_print(BIO *bio, const X509_ALGOR *alg);
-void print_attribute(BIO *out, const ASN1_TYPE *av);
-int print_attribs(BIO *out, const STACK_OF(X509_ATTRIBUTE) *attrlst, const char *name);
+                           char *pempass, const EVP_CIPHER *enc, HV* hash);
+static int alg_print(pTHX_ BIO *bio, const X509_ALGOR *alg, HV* hash);
+void print_attribute(pTHX_ BIO *out, const ASN1_TYPE *av, char **value);
+int print_attribs(pTHX_ BIO *out, const STACK_OF(X509_ATTRIBUTE) *attrlst, const char *name, HV *hash);
 void hex_prin(BIO *out, unsigned char *buf, int len);
 void dump_cert_text(BIO *out, X509 *x);
+SV * get_cert_subject_name(pTHX_ X509 *x);
+SV * get_cert_issuer_name(pTHX_ X509 *x);
 
 /* fake our package name */
 typedef PKCS12*  Crypt__OpenSSL__PKCS12;
@@ -185,14 +187,13 @@ static const char *ssl_error(void) {
 }
 
 /* these are trimmed from their openssl/apps/pkcs12.c counterparts */
-int dump_certs_pkeys_bag (BIO *bio, PKCS12_SAFEBAG *bag, const char *pass, int passlen, int options, char *pempass) {
+int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass, int passlen, int options, char *pempass, HV * bag_hv) {
 
   EVP_PKEY *pkey;
   X509 *x509;
   PKCS8_PRIV_KEY_INFO *p8;
   CONST_PKCS8_PRIV_KEY_INFO *p8c;
   const STACK_OF(X509_ATTRIBUTE) *attrs;
-  int ret = 0;
 
   attrs = PKCS12_SAFEBAG_get0_attrs(bag);
 
@@ -215,10 +216,26 @@ int dump_certs_pkeys_bag (BIO *bio, PKCS12_SAFEBAG *bag, const char *pass, int p
       if (!(pkey = EVP_PKCS82PKEY (p8c))) return 0;
 
       if (options & INFO) {
-        BIO_printf(bio, "Key bag\n");
-        print_attribs(bio, PKCS8_pkey_get0_attrs(p8c), "Key Attributes");
+        if (bag_hv) {
+          SV * value = newSVpvn("key_bag", strlen("key_bag"));
+          if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
+            croak("unable to add certificate_bag to the bag_hv");
+
+          /* Assign the output to a temporary BIO and free after it is saved to key_sv */
+          BIO *keybio = sv_bio_create();
+          PEM_write_bio_PrivateKey (keybio, pkey, enc, NULL, 0, NULL, pempass);
+          SV * key_sv = sv_bio_final(keybio);
+
+          if((hv_store(bag_hv, "key", strlen("key"), key_sv, 0)) == NULL)
+            croak("unable to add certificate_bag to the bag_hv");
+          print_attribs(aTHX_ bio, PKCS8_pkey_get0_attrs(p8c), "Key Attributes", bag_hv);
+        } else {
+          BIO_printf(bio, "Key bag\n");
+          print_attribs(aTHX_ bio, PKCS8_pkey_get0_attrs(p8c), "Key Attributes", NULL);
+          PEM_write_bio_PrivateKey (bio, pkey, enc, NULL, 0, NULL, pempass);
+        }
       }
-      PEM_write_bio_PrivateKey (bio, pkey, enc, NULL, 0, NULL, pempass);
+      //PEM_write_bio_PrivateKey (bio, pkey, enc, NULL, 0, NULL, pempass);
 
       EVP_PKEY_free(pkey);
 
@@ -230,11 +247,25 @@ int dump_certs_pkeys_bag (BIO *bio, PKCS12_SAFEBAG *bag, const char *pass, int p
         const X509_SIG *tp8;
         const X509_ALGOR *tp8alg;
 
-        BIO_printf(bio, "Shrouded Keybag: ");
         tp8 = PKCS12_SAFEBAG_get0_pkcs8(bag);
         X509_SIG_get0(tp8, &tp8alg, NULL);
-        alg_print(bio, tp8alg);
-        print_attribs(bio, attrs, "Bag Attributes");
+
+        if (bag_hv) {
+          SV * value = newSVpvn("shrouded_bag", strlen("shrouded_bag"));
+          HV * parameters_hv = newHV();;
+          if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
+            croak("unable to add type to the bag_hv");
+
+          alg_print(aTHX_ bio, tp8alg, parameters_hv);
+          print_attribs(aTHX_ bio, attrs, "Bag Attributes", bag_hv);
+
+          if((hv_store(bag_hv, "parameters", strlen("parameters"), newRV_inc((SV *) parameters_hv), 0)) == NULL)
+            croak("unable to add bag_attributes to the bag_hv");
+        } else {
+          BIO_printf(bio, "Shrouded Keybag: ");
+          alg_print(aTHX_ bio, tp8alg, NULL);
+          print_attribs(aTHX_ bio, attrs, "Bag Attributes", NULL);
+        }
       }
       if (options & NOKEYS) return 1;
 
@@ -246,11 +277,29 @@ int dump_certs_pkeys_bag (BIO *bio, PKCS12_SAFEBAG *bag, const char *pass, int p
         return 0;
       }
 
-      PKCS8_PRIV_KEY_INFO_free(p8);
+      if (options & INFO) {
+        if (bag_hv) {
+          SV * value = newSVpvn("shrouded_keybag", strlen("shrouded_keybag"));
+          if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
+            croak("unable to add type to the bag_hv");
 
-      if (options & INFO)
-        print_attribs(bio, PKCS8_pkey_get0_attrs(p8), "Key Attributes");
-      PEM_write_bio_PrivateKey (bio, pkey, enc, NULL, 0, NULL, pempass);
+          print_attribs(aTHX_ bio, PKCS8_pkey_get0_attrs(p8), "Key Attributes", bag_hv);
+
+          /* Assign the output to a temporary BIO and free after it is saved to key_sv */
+          BIO *keybio = sv_bio_create();
+          PEM_write_bio_PrivateKey (keybio, pkey, enc, NULL, 0, NULL, pempass);
+          SV * key_sv = sv_bio_final(keybio);
+
+          if((hv_store(bag_hv, "key", strlen("key"), key_sv, 0)) == NULL)
+            croak("unable to add certificate_bag to the bag_hv");
+        } else {
+          print_attribs(aTHX_ bio, PKCS8_pkey_get0_attrs(p8), "Key Attributes", NULL);
+          PEM_write_bio_PrivateKey (bio, pkey, enc, NULL, 0, NULL, pempass);
+        }
+      } else
+          PEM_write_bio_PrivateKey (bio, pkey, enc, NULL, 0, NULL, pempass);
+
+      PKCS8_PRIV_KEY_INFO_free(p8);
 
       EVP_PKEY_free(pkey);
 
@@ -273,58 +322,109 @@ int dump_certs_pkeys_bag (BIO *bio, PKCS12_SAFEBAG *bag, const char *pass, int p
 
       if ((x509 = PKCS12_SAFEBAG_get1_cert(bag)) == NULL) return 0;
       if (options & INFO) {
-        BIO_printf(bio, "Certificate bag\n");
-        print_attribs(bio, attrs, "Bag Attributes");
-        dump_cert_text(bio, x509);
-      }
-      PEM_write_bio_X509 (bio, x509);
+        if (bag_hv) {
+          SV * value = newSVpvn("certificate_bag", strlen("certificate_bag"));
+          print_attribs(aTHX_ bio, attrs, "Bag Attributes", bag_hv);
+          if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
+            croak("unable to add type to the bag_hv");
+          if((hv_store(bag_hv, "subject", strlen("subject"), get_cert_subject_name(aTHX_ x509), 0)) == NULL)
+            croak("unable to add subject to the bag_hv");
+          if((hv_store(bag_hv, "issuer", strlen("issuer"), get_cert_issuer_name(aTHX_ x509), 0)) == NULL)
+            croak("unable to add issuer to the bag_hv");
+          BIO *keybio = sv_bio_create();
+          PEM_write_bio_X509 (keybio, x509);
+          SV * key_sv = sv_bio_final(keybio);
+          if((hv_store(bag_hv, "cert", strlen("cert"), key_sv, 0)) == NULL)
+            croak("unable to add certificate_bag to the bag_hv");
+        } else
+        {
+          BIO_printf(bio, "Certificate bag\n");
+          print_attribs(aTHX_ bio, attrs, "Bag Attributes", NULL);
+          dump_cert_text(bio, x509);
+          PEM_write_bio_X509 (bio, x509);
+        }
+      } else
+        PEM_write_bio_X509 (bio, x509);
 
       X509_free(x509);
 
       break;
 
     case NID_secretBag:
-        if (options & INFO)
+        if (options & INFO) {
           BIO_printf(bio, "Secret bag\n");
-        print_attribs(bio, attrs, "Bag Attributes");
-        BIO_printf(bio, "Bag Type: ");
+        if (bag_hv){
+          print_attribs(aTHX_ bio, attrs, "Bag Attributes", bag_hv);
+        }
+        else
+          print_attribs(aTHX_ bio, attrs, "Bag Attributes", NULL);
+          BIO_printf(bio, "Bag Type: ");
+        }
         i2a_ASN1_OBJECT(bio, PKCS12_SAFEBAG_get0_bag_type(bag));
-        BIO_printf(bio, "\nBag Value: ");
-        print_attribute(bio, PKCS12_SAFEBAG_get0_bag_obj(bag));
+        if (options & INFO) {
+          char * attribute_value = NULL;
+          if(bag_hv) {
+            Newx(attribute_value, 0, char);
+            print_attribute(aTHX_ bio, PKCS12_SAFEBAG_get0_bag_obj(bag), &attribute_value);
+            if(hv_store(bag_hv, "attribute_here", strlen("attribute_here"), newSVpvn(attribute_value, strlen(attribute_value)), 0) == NULL)
+              croak("unable to add MAC to the bag_hv");
+          } else {
+            BIO_printf(bio, "\nBag Value: ");
+            print_attribute(aTHX_ bio, PKCS12_SAFEBAG_get0_bag_obj(bag), &attribute_value);
+          }
+          Safefree(attribute_value);
+        }
         break;
     case NID_safeContentsBag:
-        if (options & INFO)
+        if (options & INFO) {
           BIO_printf(bio, "Safe Contents bag\n");
-        print_attribs(bio, attrs, "Bag Attributes");
-        dump_certs_pkeys_bags(bio, PKCS12_SAFEBAG_get0_safes(bag),
-                                      pass, passlen, options, pempass, enc);
+          if(bag_hv) {
+            print_attribs(aTHX_ bio, attrs, "Bag Attributes", bag_hv);
+          } else
+            print_attribs(aTHX_ bio, attrs, "Bag Attributes", NULL);
+          dump_certs_pkeys_bags(aTHX_ bio, PKCS12_SAFEBAG_get0_safes(bag),
+                                      pass, passlen, options, pempass, enc, bag_hv);
+        }
         break;
   }
 
   return 1;
 }
 
-int dump_certs_pkeys_bags(BIO *bio, const STACK_OF(PKCS12_SAFEBAG) *bags, const char *pass, int passlen, int options, char *pempass, const EVP_CIPHER *enc) {
+int dump_certs_pkeys_bags(pTHX_ BIO *bio, const STACK_OF(PKCS12_SAFEBAG) *bags, const char *pass, int passlen, int options, char *pempass, const EVP_CIPHER *enc, HV * hash) {
 
   int i;
 
+  AV * bags_av = NULL;
+  HV * bag_hv = NULL;
+  if(hash) {
+    bags_av = newAV();
+  }
   for (i = 0; i < sk_PKCS12_SAFEBAG_num(bags); i++) {
-
-    if (!dump_certs_pkeys_bag (bio, sk_PKCS12_SAFEBAG_value (bags, i), pass, passlen, options, pempass)) {
+    if(hash)
+      bag_hv = newHV();
+    if (!dump_certs_pkeys_bag (aTHX_ bio, sk_PKCS12_SAFEBAG_value (bags, i), pass, passlen, options, pempass, bag_hv)) {
       return 0;
     }
+    if(hash)
+      av_push(bags_av, newRV_inc((SV *) bag_hv));
   }
-
+  if (hash) {
+    if((hv_store(hash, "bags", strlen("bags"), newRV_inc((SV *) bags_av), 0)) == NULL)
+      croak("unable to add bags to the hash");
+  }
   return 1;
 }
 
-int dump_certs_keys_p12(BIO *bio, PKCS12 *p12, char *pass, int passlen, int options, char *pempass) {
+int dump_certs_keys_p12(pTHX_ BIO *bio, PKCS12 *p12, char *pass, int passlen, int options, char *pempass, HV * orig_hash) {
 
   STACK_OF(PKCS7) *asafes;
   STACK_OF(PKCS12_SAFEBAG) *bags;
 
   int i, bagnid;
   PKCS7 *p7;
+  HV * bag_hv = NULL;
+  HV * parameters_hv = NULL;
 
   if ((asafes = PKCS12_unpack_authsafes(p12)) == NULL) {
     croak("Unable to PKCS12_unpack_authsafes");
@@ -333,7 +433,10 @@ int dump_certs_keys_p12(BIO *bio, PKCS12 *p12, char *pass, int passlen, int opti
 
   for (i = 0; i < sk_PKCS7_num(asafes); i++) {
 
-    STACK_OF(PKCS12_SAFEBAG) *bags;
+  if (orig_hash) {
+    parameters_hv = newHV();
+    bag_hv = newHV();
+  }
 
     p7 = sk_PKCS7_value(asafes, i);
 
@@ -341,18 +444,35 @@ int dump_certs_keys_p12(BIO *bio, PKCS12 *p12, char *pass, int passlen, int opti
 
     if (bagnid == NID_pkcs7_data) {
 
+      if (options & INFO) {
+        if (orig_hash) {
+          bag_hv = newHV();
+          if((hv_store(orig_hash, "pkcs7_data", strlen("pkcs7_data"), newRV_inc((SV *) bag_hv), 0)) == NULL)
+            croak("unable to add pkcs7_data to the orig_hash");
+        }
+        else
+          BIO_printf(bio, "PKCS7 Data\n");
+      }
       bags = PKCS12_unpack_p7data(p7);
-      if (options & INFO)
-        BIO_printf(bio, "PKCS7 Data\n");
 
     } else if (bagnid == NID_pkcs7_encrypted) {
-
       if (options & INFO) {
-        BIO_printf(bio, "PKCS7 Encrypted data: ");
-        if (p7->d.encrypted == NULL) {
-          BIO_printf(bio, "<no data>\n");
+        if (orig_hash) {
+          bag_hv = newHV();
+
+          if (p7->d.encrypted != NULL)
+            alg_print(aTHX_ bio, p7->d.encrypted->enc_data->algorithm, parameters_hv);
+          if((hv_store(bag_hv, "parameters", strlen("parameters"), newRV_inc((SV *) parameters_hv), 0)) == NULL)
+            croak("unable to add parameters to the hash");
+          if((hv_store(orig_hash, "pkcs7_encrypted_data", strlen("pkcs7_encrypted_data"), newRV_inc((SV *) bag_hv), 0)) == NULL)
+            croak("unable to add pkcs7_encrypted_data to the orig_hash");
         } else {
-          alg_print(bio, p7->d.encrypted->enc_data->algorithm);
+          BIO_printf(bio, "PKCS7 Encrypted data: ");
+          if (p7->d.encrypted == NULL) {
+            BIO_printf(bio, "<no data>\n");
+          } else {
+            alg_print(aTHX_ bio, p7->d.encrypted->enc_data->algorithm, NULL);
+          }
         }
       }
       bags = PKCS12_unpack_p7encdata(p7, pass, passlen);
@@ -363,7 +483,7 @@ int dump_certs_keys_p12(BIO *bio, PKCS12 *p12, char *pass, int passlen, int opti
 
     if (bags == NULL) return 0;
 
-    if (!dump_certs_pkeys_bags(bio, bags, pass, passlen, options, pempass, enc)) {
+    if (!dump_certs_pkeys_bags(aTHX_ bio, bags, pass, passlen, options, pempass, enc, bag_hv)) {
 
       sk_PKCS12_SAFEBAG_pop_free(bags, PKCS12_SAFEBAG_free);
       return 0;
@@ -425,6 +545,7 @@ void print_name(BIO *out, const char *title, const X509_NAME *nm)
     if (mline)
       BIO_puts(out, "\n");
       X509_NAME_print_ex(out, nm, indent, lflags);
+
       BIO_puts(out, "\n");
   }
 }
@@ -433,6 +554,33 @@ void dump_cert_text(BIO *out, X509 *x)
 {
   print_name(out, "subject=", X509_get_subject_name(x));
   print_name(out, "issuer=", X509_get_issuer_name(x));
+}
+
+SV * get_cert_subject_name(pTHX_ X509 *x)
+{
+  BIO *bio = sv_bio_create();
+
+  print_name(bio, "", X509_get_subject_name(x));
+  return sv_bio_final(bio);
+}
+
+SV * get_cert_issuer_name(pTHX_ X509 *x)
+{
+  BIO *bio = sv_bio_create();
+
+  print_name(bio, "", X509_get_issuer_name(x));
+  return sv_bio_final(bio);
+}
+
+void get_hex(char *out, unsigned char *buf, int len)
+{
+  int i;
+  for (i = 0; i < len; i++) {
+    if (i == (len-1))
+      out += sprintf(out, "%02X", buf[i]);
+    else
+      out += sprintf(out, "%02X ", buf[i]);
+  }
 }
 
 void hex_prin(BIO *out, unsigned char *buf, int len)
@@ -444,45 +592,69 @@ void hex_prin(BIO *out, unsigned char *buf, int len)
 
 /* Generalised x509 attribute value print */
 
-void print_attribute(BIO *out, const ASN1_TYPE *av)
+void print_attribute(pTHX_ BIO *out, const ASN1_TYPE *av, char **attribute)
 {
   char *value;
   const char *ln;
   char objbuf[80];
-
   switch (av->type) {
   case V_ASN1_BMPSTRING:
     value = OPENSSL_uni2asc(av->value.bmpstring->data,
                                 av->value.bmpstring->length);
-    BIO_printf(out, "%s\n", value);
-    OPENSSL_free(value);
+    if(*attribute != NULL) {
+      Renew(*attribute, av->value.bmpstring->length, char);
+      strncpy(*attribute, value, av->value.bmpstring->length);
+    } else {
+      BIO_printf(out, "%s\n", value);
+      OPENSSL_free(value);
+    }
     break;
 
   case V_ASN1_UTF8STRING:
-    BIO_printf(out, "%.*s\n", av->value.utf8string->length,
+    if(*attribute != NULL) {
+      Renew(*attribute, av->value.utf8string->length, char);
+      strncpy(*attribute, (const char * ) av->value.utf8string->data, av->value.utf8string->length);
+    } else {
+      BIO_printf(out, "%.*s\n", av->value.utf8string->length,
                    av->value.utf8string->data);
+    }
     break;
 
   case V_ASN1_OCTET_STRING:
-    hex_prin(out, av->value.octet_string->data,
+    if(*attribute != NULL) {
+      Renew(*attribute, av->value.octet_string->length * 4, char);
+      get_hex(*attribute, av->value.octet_string->data, av->value.octet_string->length);
+    } else {
+      hex_prin(out, av->value.octet_string->data,
                  av->value.octet_string->length);
-    BIO_printf(out, "\n");
+      BIO_printf(out, "\n");
+    }
     break;
 
   case V_ASN1_BIT_STRING:
-    hex_prin(out, av->value.bit_string->data,
+    if(*attribute != NULL) {
+      Renew(*attribute, av->value.bit_string->length *4, char);
+      get_hex(*attribute, av->value.bit_string->data, av->value.bit_string->length);
+    } else {
+      hex_prin(out, av->value.bit_string->data,
                  av->value.bit_string->length);
-    BIO_printf(out, "\n");
+      BIO_printf(out, "\n");
+    }
     break;
 
   case V_ASN1_OBJECT:
     ln = OBJ_nid2ln(OBJ_obj2nid(av->value.object));
     if (!ln)
       ln = "";
-  OBJ_obj2txt(objbuf, sizeof(objbuf), av->value.object, 1);
-  BIO_printf(out, "%s (%s)", ln, objbuf);
-  BIO_printf(out, "\n");
-  break;
+    OBJ_obj2txt(objbuf, sizeof(objbuf), av->value.object, 1);
+    if(*attribute != NULL) {
+      Renew(*attribute, strlen(ln), char);
+      strncpy(*attribute, ln, strlen(*attribute));
+    } else {
+      BIO_printf(out, "%s (%s)", ln, objbuf);
+      BIO_printf(out, "\n");
+    }
+    break;
 
   default:
     BIO_printf(out, "<Unsupported tag %d>\n", av->type);
@@ -492,48 +664,87 @@ void print_attribute(BIO *out, const ASN1_TYPE *av)
 
 /* Generalised attribute print: handle PKCS#8 and bag attributes */
 
-int print_attribs(BIO *out, const STACK_OF(X509_ATTRIBUTE) *attrlst,
-                  const char *name)
+int print_attribs(pTHX_ BIO *out, const STACK_OF(X509_ATTRIBUTE) *attrlst,
+                  const char *name, HV * hash)
 {
   X509_ATTRIBUTE *attr;
   ASN1_TYPE *av;
   int i, j, attr_nid;
+  AV * bags_av = newAV();
   if (!attrlst) {
-    BIO_printf(out, "%s: <No Attributes>\n", name);
+    if(hash) {
+      /* FIXME: May need to change attribute storage for empty attributes */
+      //SV * value = newSVpvn("<No Attributes>", strlen("<No Attributes>"));
+      //if((hv_store(hash, "attributes", strlen("attributes"), newRV_inc((SV *) bags_av), 0)) == NULL)
+      //  croak("unable to add attributes to the hash");
+    } else
+      BIO_printf(out, "%s: <No Attributes>\n", name);
     return 1;
   }
   if (!sk_X509_ATTRIBUTE_num(attrlst)) {
-    BIO_printf(out, "%s: <Empty Attributes>\n", name);
+    if(hash) {
+      /* FIXME: May need to change attribute storage for empty attributes */
+      //if((hv_store(hash, "attributes", strlen("attributes"), newRV_inc((SV *) bags_av), 0)) == NULL)
+      //  croak("unable to add attributes to the hash");
+    } else
+      BIO_printf(out, "%s: <Empty Attributes>\n", name);
     return 1;
   }
-  BIO_printf(out, "%s\n", name);
+  if(!hash)
+    BIO_printf(out, "%s\n", name);
+
+  HV * bag_hv = newHV();
   for (i = 0; i < sk_X509_ATTRIBUTE_num(attrlst); i++) {
     ASN1_OBJECT *attr_obj;
     attr = sk_X509_ATTRIBUTE_value(attrlst, i);
     attr_obj = X509_ATTRIBUTE_get0_object(attr);
     attr_nid = OBJ_obj2nid(attr_obj);
-    BIO_printf(out, "    ");
-    if (attr_nid == NID_undef) {
+    if (attr_nid == NID_undef && !hash) {
       i2a_ASN1_OBJECT(out, attr_obj);
       BIO_printf(out, ": ");
     } else {
-      BIO_printf(out, "%s: ", OBJ_nid2ln(attr_nid));
+      if (!hash) {
+        /* Print the name of the attributes */
+        BIO_printf(out, "    ");
+        BIO_printf(out, "%s: ", OBJ_nid2ln(attr_nid));
+      }
     }
 
     if (X509_ATTRIBUTE_count(attr)) {
       for (j = 0; j < X509_ATTRIBUTE_count(attr); j++)
       {
         av = X509_ATTRIBUTE_get0_type(attr, j);
-        print_attribute(out, av);
+        char *attribute_value = NULL;
+        if(hash) {
+          Newx(attribute_value, 0, char);
+          print_attribute(aTHX_ out, av, &attribute_value);
+          const char * attribute_id = NULL;
+          if (attr_nid != NID_undef) {
+            /* Save the attribute name and value to the hash */
+            attribute_id = OBJ_nid2ln(attr_nid);
+            if (attribute_id) {
+              if((hv_store(bag_hv, attribute_id, strlen(attribute_id), newSVpvn(attribute_value, strlen(attribute_value)), 0)) == NULL)
+                croak("unable to add MAC to the hash");
+            }
+          }
+        } else {
+          print_attribute(aTHX_ out, av, &attribute_value);
+        }
+        Safefree(attribute_value);
+        av_push(bags_av, newRV_inc((SV *) bag_hv));
       }
     } else {
       BIO_printf(out, "<No Values>\n");
     }
   }
+  if (hash) {
+    if((hv_store(hash, "bag_attributes", strlen("bag_attributes"), newRV_inc((SV *) bag_hv), 0)) == NULL)
+      croak("unable to add bags to the hash");
+  }
   return 1;
 }
 
-static int alg_print(BIO *bio, const X509_ALGOR *alg)
+static int alg_print(pTHX_ BIO *bio, const X509_ALGOR *alg, HV * parameters_hash)
 {
   int pbenid, aparamtype;
   const ASN1_OBJECT *aoid;
@@ -543,8 +754,16 @@ static int alg_print(BIO *bio, const X509_ALGOR *alg)
   X509_ALGOR_get0(&aoid, &aparamtype, &aparam, alg);
   pbenid = OBJ_obj2nid(aoid);
 
-  BIO_printf(bio, "%s", OBJ_nid2ln(pbenid));
-
+  if (parameters_hash) {
+    SV * nid_long_name = newSVpvn(OBJ_nid2ln(pbenid), strlen(OBJ_nid2ln(pbenid)));
+    if((hv_store(parameters_hash, "nid_long_name", strlen("nid_long_name"), nid_long_name, 0)) == NULL)
+      croak("unable to add MAC to the parameters_hash");
+    SV * nid_short_name = newSVpvn(OBJ_nid2sn(pbenid), strlen(OBJ_nid2sn(pbenid)));
+    if((hv_store(parameters_hash, "nid_short_name", strlen("nid_short_name"), nid_short_name, 0)) == NULL)
+      croak("unable to add MAC to the parameters_hash");
+  } else {
+    BIO_printf(bio, "%s", OBJ_nid2ln(pbenid));
+  }
   /*
   * If PBE algorithm is PBES2 decode algorithm parameters
   * for additional details.
@@ -555,14 +774,23 @@ static int alg_print(BIO *bio, const X509_ALGOR *alg)
     if (aparamtype == V_ASN1_SEQUENCE)
       pbe2 = ASN1_item_unpack(aparam, ASN1_ITEM_rptr(PBE2PARAM));
     if (pbe2 == NULL) {
-      BIO_puts(bio, ", <unsupported parameters>");
+        BIO_puts(bio, ", <unsupported parameters>");
       goto done;
     }
     X509_ALGOR_get0(&aoid, &aparamtype, &aparam, pbe2->keyfunc);
     pbenid = OBJ_obj2nid(aoid);
+
     X509_ALGOR_get0(&aoid, NULL, NULL, pbe2->encryption);
     encnid = OBJ_obj2nid(aoid);
-    BIO_printf(bio, ", %s, %s", OBJ_nid2ln(pbenid),
+    if (parameters_hash) {
+      SV * nid_long_name = newSVpvn(OBJ_nid2ln(pbenid), strlen(OBJ_nid2ln(pbenid)));
+      if((hv_store(parameters_hash, "nid_long_name", strlen("nid_long_name"), nid_long_name, 0)) == NULL)
+        croak("unable to add MAC to the parameters_hash");
+      SV * nid_short_name = newSVpvn(OBJ_nid2sn(pbenid), strlen(OBJ_nid2sn(pbenid)));
+      if((hv_store(parameters_hash, "nid_short_name", strlen("nid_short_name"), nid_short_name, 0)) == NULL)
+        croak("unable to add MAC to the parameters_hash");
+    } else
+      BIO_printf(bio, ", %s, %s", OBJ_nid2ln(pbenid),
                    OBJ_nid2sn(encnid));
     /* If KDF is PBKDF2 decode parameters */
     if (pbenid == NID_id_pbkdf2) {
@@ -581,7 +809,12 @@ static int alg_print(BIO *bio, const X509_ALGOR *alg)
         X509_ALGOR_get0(&aoid, NULL, NULL, kdf->prf);
         prfnid = OBJ_obj2nid(aoid);
       }
-      BIO_printf(bio, ", Iteration %ld, PRF %s",
+      if (parameters_hash) {
+        SV * iteration = newSViv(ASN1_INTEGER_get(kdf->iter));
+        if((hv_store(parameters_hash, "iteration", strlen("iteration"), iteration, 0)) == NULL)
+          croak("unable to add iteration to the parameters_hash");
+      } else
+        BIO_printf(bio, ", Iteration %ld, PRF %s",
                        ASN1_INTEGER_get(kdf->iter), OBJ_nid2sn(prfnid));
       PBKDF2PARAM_free(kdf);
 #ifndef OPENSSL_NO_SCRYPT
@@ -594,6 +827,16 @@ static int alg_print(BIO *bio, const X509_ALGOR *alg)
           BIO_puts(bio, ", <unsupported parameters>");
           goto done;
         }
+        if (parameters_hash) {
+          if((hv_store(parameters_hash, "salt_length", strlen("salt_length"), newSViv(ASN1_STRING_length(kdf->salt)), 0)) == NULL)
+            croak("unable to add salt_length to the parameters_hash");
+          if((hv_store(parameters_hash, "cost", strlen("cost"), newSViv(ASN1_INTEGER_get(kdf->costParameter)), 0)) == NULL)
+            croak("unable to add cost to the parameters_hash");
+          if((hv_store(parameters_hash, "block_size", strlen("block_size"), newSViv(ASN1_INTEGER_get(kdf->blockSize)), 0)) == NULL)
+            croak("unable to add block_size to the parameters_hash");
+          if((hv_store(parameters_hash, "parallelism", strlen("parallelism"), newSViv(ASN1_INTEGER_get(kdf->parallelizationParameter)), 0)) == NULL)
+            croak("unable to add parallelism to the parameters_hash");
+        } else
         BIO_printf(bio, ", Salt length: %d, Cost(N): %ld, "
                        "Block size(r): %ld, Parallelism(p): %ld",
                        ASN1_STRING_length(kdf->salt),
@@ -611,11 +854,17 @@ static int alg_print(BIO *bio, const X509_ALGOR *alg)
         BIO_puts(bio, ", <unsupported parameters>");
         goto done;
       }
-      BIO_printf(bio, ", Iteration %ld", ASN1_INTEGER_get(pbe->iter));
+      if (parameters_hash) {
+        SV * iteration = newSViv(ASN1_INTEGER_get(pbe->iter));
+        if((hv_store(parameters_hash, "iteration", strlen("iteration"), iteration, 0)) == NULL)
+          croak("unable to add MAC to the parameters_hash");
+      } else
+        BIO_printf(bio, ", Iteration %ld", ASN1_INTEGER_get(pbe->iter));
       PBEPARAM_free(pbe);
   }
   done:
-  BIO_puts(bio, "\n");
+  if(!parameters_hash)
+    BIO_puts(bio, "\n");
   return 1;
 }
 
@@ -897,7 +1146,7 @@ certificate(pkcs12, pwd = "")
   if ((asafes = PKCS12_unpack_authsafes(pkcs12)) == NULL)
         RETVAL = newSVpvn("",0);
 
-  dump_certs_keys_p12(bio, pkcs12, pwd, strlen(pwd), CLCERTS|NOKEYS, NULL);
+  dump_certs_keys_p12(aTHX_ bio, pkcs12, pwd, strlen(pwd), CLCERTS|NOKEYS, NULL, NULL);
 
   RETVAL = sv_bio_final(bio);
 
@@ -918,9 +1167,73 @@ private_key(pkcs12, pwd = "")
 
   PKCS12_unpack_authsafes(pkcs12);
 
-  dump_certs_keys_p12(bio, pkcs12, pwd, strlen(pwd), NOCERTS, NULL);
+  dump_certs_keys_p12(aTHX_ bio, pkcs12, pwd, strlen(pwd), NOCERTS, NULL, NULL);
 
   RETVAL = sv_bio_final(bio);
+
+  OUTPUT:
+  RETVAL
+
+HV* info_as_hash(pkcs12, pwd = "")
+  Crypt::OpenSSL::PKCS12 pkcs12
+  char *pwd
+
+  PREINIT:
+  BIO *bio;
+  STACK_OF(PKCS7) *asafes = NULL;
+
+  const ASN1_INTEGER *tmaciter;
+  const X509_ALGOR *macalgid;
+  const ASN1_OBJECT *macobj;
+  const ASN1_OCTET_STRING *tmac;
+  const ASN1_OCTET_STRING *tsalt;
+
+  CODE:
+  SV *value;
+
+  RETVAL = newHV();
+
+  bio = sv_bio_create();
+
+  if ((asafes = PKCS12_unpack_authsafes(pkcs12)) == NULL)
+        RETVAL = newHV();
+  //asafes = PKCS12_unpack_authsafes(pkcs12);
+
+  PKCS12_get0_mac(&tmac, &macalgid, &tsalt, &tmaciter, pkcs12);
+  /* current hash algorithms do not use parameters so extract just name,
+     in future alg_print() may be needed */
+  X509_ALGOR_get0(&macobj, NULL, NULL, macalgid);
+  i2a_ASN1_OBJECT(bio, macobj);
+
+  SV * mac_iteration = newSViv (tmaciter != NULL ? ASN1_INTEGER_get(tmaciter) : 1L);
+  value = sv_bio_final(bio);
+  HV * mac = newHV();
+
+  if((hv_store(mac, "digest", strlen("digest"), value, 0)) == NULL)
+    croak("unable to add digest to the hash");
+
+  if((hv_store(mac, "iteration", strlen("iteration"), mac_iteration, 0)) == NULL)
+    croak("unable to add iteration to the hash");
+
+  bio = sv_bio_create();
+  // BIO_printf(bio, "MAC length: %ld, salt length: %ld",
+  SV * mac_len = newSViv(tmac != NULL ? ASN1_STRING_length(tmac) : 0L);
+  SV * salt_len = newSViv(tsalt != NULL ? ASN1_STRING_length(tsalt) : 0L);
+
+  if((hv_store(mac, "length", 6, mac_len, 0)) == NULL)
+    croak("unable to add length to the hash");
+
+  if((hv_store(mac, "salt_length", strlen("salt_length"), INT2PTR(SV*, salt_len), 0)) == NULL)
+    croak("unable to add salt_length to the hash");
+
+  if((hv_store(RETVAL, "mac", strlen("mac"), newRV_inc((SV *) mac), 0)) == NULL)
+    croak("unable to add MAC to the hash");
+
+  dump_certs_keys_p12(aTHX_ bio, pkcs12, pwd, strlen(pwd), INFO, NULL, RETVAL);
+
+  SV * end = sv_bio_final(bio);
+  if (SvCUR(end) != 0)
+    warn("bio from info_as_hash should be zero length - report issue");
 
   OUTPUT:
   RETVAL
@@ -959,7 +1272,7 @@ info(pkcs12, pwd = "")
         tmac != NULL ? ASN1_STRING_length(tmac) : 0L,
         tsalt != NULL ? ASN1_STRING_length(tsalt) : 0L);
 
-  dump_certs_keys_p12(bio, pkcs12, pwd, strlen(pwd), INFO, NULL);
+  dump_certs_keys_p12(aTHX_ bio, pkcs12, pwd, strlen(pwd), INFO, NULL, NULL);
 
   RETVAL = sv_bio_final(bio);
 
