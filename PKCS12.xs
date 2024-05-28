@@ -1,6 +1,7 @@
 #include "EXTERN.h"
 #include "perl.h"
 #include "XSUB.h"
+#include "ppport.h"
 
 #include <openssl/crypto.h>
 #include <openssl/err.h>
@@ -205,7 +206,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
 
 #ifndef OPENSSL_NO_DES
   EVP_CIPHER *default_enc = (EVP_CIPHER *)EVP_des_ede3_cbc();
-  enc = NULL; //default_enc;
+  enc = NULL; /*default_enc; */
 #else
   EVP_CIPHER *default_enc = (EVP_CIPHER *)EVP_aes_256_cbc();
   enc = default_enc;
@@ -241,7 +242,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
           PEM_write_bio_PrivateKey (bio, pkey, enc, NULL, 0, NULL, pempass);
         }
       }
-      //PEM_write_bio_PrivateKey (bio, pkey, enc, NULL, 0, NULL, pempass);
+      /*PEM_write_bio_PrivateKey (bio, pkey, enc, NULL, 0, NULL, pempass); */
 
       EVP_PKEY_free(pkey);
 
@@ -680,9 +681,9 @@ int print_attribs(pTHX_ BIO *out, const STACK_OF(X509_ATTRIBUTE) *attrlst,
   if (!attrlst) {
     if(hash) {
       /* FIXME: May need to change attribute storage for empty attributes */
-      //SV * value = newSVpvn("<No Attributes>", strlen("<No Attributes>"));
-      //if((hv_store(hash, "attributes", strlen("attributes"), newRV_inc((SV *) bags_av), 0)) == NULL)
-      //  croak("unable to add attributes to the hash");
+      /*SV * value = newSVpvn("<No Attributes>", strlen("<No Attributes>")); */
+      /*if((hv_store(hash, "attributes", strlen("attributes"), newRV_inc((SV *) bags_av), 0)) == NULL) */
+      /*  croak("unable to add attributes to the hash"); */
     } else
       BIO_printf(out, "%s: <No Attributes>\n", name);
     return 1;
@@ -690,8 +691,8 @@ int print_attribs(pTHX_ BIO *out, const STACK_OF(X509_ATTRIBUTE) *attrlst,
   if (!sk_X509_ATTRIBUTE_num(attrlst)) {
     if(hash) {
       /* FIXME: May need to change attribute storage for empty attributes */
-      //if((hv_store(hash, "attributes", strlen("attributes"), newRV_inc((SV *) bags_av), 0)) == NULL)
-      //  croak("unable to add attributes to the hash");
+      /*if((hv_store(hash, "attributes", strlen("attributes"), newRV_inc((SV *) bags_av), 0)) == NULL) */
+      /*  croak("unable to add attributes to the hash"); */
     } else
       BIO_printf(out, "%s: <Empty Attributes>\n", name);
     return 1;
@@ -1203,7 +1204,7 @@ HV* info_as_hash(pkcs12, pwd = "")
 
   if ((asafes = PKCS12_unpack_authsafes(pkcs12)) == NULL)
         RETVAL = newHV();
-  //asafes = PKCS12_unpack_authsafes(pkcs12);
+  /*asafes = PKCS12_unpack_authsafes(pkcs12); */
 
   PKCS12_get0_mac(&tmac, &macalgid, &tsalt, &tmaciter, pkcs12);
   /* current hash algorithms do not use parameters so extract just name,
@@ -1222,7 +1223,7 @@ HV* info_as_hash(pkcs12, pwd = "")
     croak("unable to add iteration to the hash");
 
   bio = sv_bio_create();
-  // BIO_printf(bio, "MAC length: %ld, salt length: %ld",
+  /* BIO_printf(bio, "MAC length: %ld, salt length: %ld", */
   SV * mac_len = newSViv(tmac != NULL ? ASN1_STRING_length(tmac) : 0L);
   SV * salt_len = newSViv(tsalt != NULL ? ASN1_STRING_length(tsalt) : 0L);
 
