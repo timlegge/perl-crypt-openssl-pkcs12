@@ -46,8 +46,9 @@
 #endif
 
 #if OPENSSL_VERSION_NUMBER < 0x30000000L
-#define PKCS12_SAFEBAG_get0_bag_obj(o) ((o)->value.bag->value.other)
-#define PKCS12_SAFEBAG_get0_bag_type(o) ((o)->value.bag->type)
+#include "p12_local.h"
+#define PKCS12_SAFEBAG_get0_bag_type(o) (o->value.bag->type)
+#define PKCS12_SAFEBAG_get0_bag_obj(o) (o->value.bag->value.other)
 #endif
 
 const EVP_CIPHER *enc;
@@ -220,7 +221,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
   CONST_PKCS8_PRIV_KEY_INFO *p8c;
   CONST_STACK_OF(X509_ATTRIBUTE) *attrs;
 
-#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+#if OPENSSL_VERSION_NUMBER >= 0x10000000L
   attrs = PKCS12_SAFEBAG_get0_attrs(bag);
 #endif
 
