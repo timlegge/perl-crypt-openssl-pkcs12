@@ -43,8 +43,8 @@
 #endif
 
 #if OPENSSL_VERSION_NUMBER < 0x30000000L
-#define PKCS12_SAFEBAG_get0_bag_obj(o) ((o)->bag->value.other)
-#define PKCS12_SAFEBAG_get0_bag_type(o) ((o)->bag->type)
+#define PKCS12_SAFEBAG_get0_bag_obj(o) ((o)->value.bag->value.other)
+#define PKCS12_SAFEBAG_get0_bag_type(o) ((o)->value.bag->type)
 #endif
 
 const EVP_CIPHER *enc;
