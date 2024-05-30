@@ -25,17 +25,38 @@
 #define PKCS12_SAFEBAG_get_nid M_PKCS12_bag_type
 #define PKCS12_SAFEBAG_get1_cert PKCS12_certbag2x509
 #define CONST_PKCS8_PRIV_KEY_INFO PKCS8_PRIV_KEY_INFO
+#define CONST_X509_ALGOR X509_ALGOR
+#define CONST_X509_SIG X509_SIG
+#define CONST_ASN1_TYPE ASN1_TYPE
+#define CONST_STACK_OF(o) STACK_OF(o)
+#define CONST_X509_NAME X509_NAME
+#define CONST_ASN1_INTEGER ASN1_INTEGER
+#define CONST_ASN1_OBJECT ASN1_OBJECT
+#define CONST_ASN1_OCTET_STRING ASN1_OCTET_STRING
 #else
 #define CONST_PKCS8_PRIV_KEY_INFO const PKCS8_PRIV_KEY_INFO
+#define CONST_X509_ALGOR const X509_ALGOR
+#define CONST_X509_SIG const X509_SIG
+#define CONST_ASN1_TYPE const ASN1_TYPE
+#define CONST_STACK_OF(o) const STACK_OF(o)
+#define CONST_X509_NAME const X509_NAME
+#define CONST_ASN1_INTEGER const ASN1_INTEGER
+#define CONST_ASN1_OBJECT const ASN1_OBJECT
+#define CONST_ASN1_OCTET_STRING const ASN1_OCTET_STRING
+#endif
+
+#if OPENSSL_VERSION_NUMBER < 0x30000000L
+#define PKCS12_SAFEBAG_get0_bag_obj(o) ((o)->value.bag->value.other)
+#define PKCS12_SAFEBAG_get0_bag_type(o) ((o)->value.bag->type)
 #endif
 
 const EVP_CIPHER *enc;
-int dump_certs_pkeys_bags(pTHX_ BIO *out, const STACK_OF(PKCS12_SAFEBAG) *bags,
+int dump_certs_pkeys_bags(pTHX_ BIO *out, CONST_STACK_OF(PKCS12_SAFEBAG) *bags,
                            const char *pass, int passlen, int options,
                            char *pempass, const EVP_CIPHER *enc, HV* hash);
-static int alg_print(pTHX_ BIO *bio, const X509_ALGOR *alg, HV* hash);
-void print_attribute(pTHX_ BIO *out, const ASN1_TYPE *av, char **value);
-int print_attribs(pTHX_ BIO *out, const STACK_OF(X509_ATTRIBUTE) *attrlst, const char *name, HV *hash);
+static int alg_print(pTHX_ BIO *bio, CONST_X509_ALGOR *alg, HV* hash);
+void print_attribute(pTHX_ BIO *out, CONST_ASN1_TYPE *av, char **value);
+int print_attribs(pTHX_ BIO *out, CONST_STACK_OF(X509_ATTRIBUTE) *attrlst, const char *name, HV *hash);
 void hex_prin(BIO *out, unsigned char *buf, int len);
 void dump_cert_text(BIO *out, X509 *x);
 SV * get_cert_subject_name(pTHX_ X509 *x);
@@ -197,8 +218,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
   X509 *x509;
   PKCS8_PRIV_KEY_INFO *p8;
   CONST_PKCS8_PRIV_KEY_INFO *p8c;
-#if OPENSSL_VERSION_NUMBER >= 0x30000000L
-  const STACK_OF(X509_ATTRIBUTE) *attrs;
+  CONST_STACK_OF(X509_ATTRIBUTE) *attrs;
 
 #if OPENSSL_VERSION_NUMBER >= 0x30000000L
   attrs = PKCS12_SAFEBAG_get0_attrs(bag);
@@ -251,8 +271,8 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
     case NID_pkcs8ShroudedKeyBag: ;
 
       if (options & INFO) {
-        const X509_SIG *tp8;
-        const X509_ALGOR *tp8alg;
+        CONST_X509_SIG *tp8;
+        CONST_X509_ALGOR *tp8alg;
 
         tp8 = PKCS12_SAFEBAG_get0_pkcs8(bag);
         X509_SIG_get0(tp8, &tp8alg, NULL);
@@ -398,7 +418,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
   return 1;
 }
 
-int dump_certs_pkeys_bags(pTHX_ BIO *bio, const STACK_OF(PKCS12_SAFEBAG) *bags, const char *pass, int passlen, int options, char *pempass, const EVP_CIPHER *enc, HV * hash) {
+int dump_certs_pkeys_bags(pTHX_ BIO *bio, CONST_STACK_OF(PKCS12_SAFEBAG) *bags, const char *pass, int passlen, int options, char *pempass, const EVP_CIPHER *enc, HV * hash) {
 
   int i;
 
@@ -528,7 +548,7 @@ unsigned long get_nameopt(void)
       nmflag_set ? nmflag : XN_FLAG_SEP_CPLUS_SPC | ASN1_STRFLGS_UTF8_CONVERT | XN_FLAG_SPC_EQ;
 }
 
-void print_name(BIO *out, const char *title, const X509_NAME *nm)
+void print_name(BIO *out, const char *title, CONST_X509_NAME *nm)
 {
   char *buf;
   char mline = 0;
@@ -599,7 +619,7 @@ void hex_prin(BIO *out, unsigned char *buf, int len)
 
 /* Generalised x509 attribute value print */
 
-void print_attribute(pTHX_ BIO *out, const ASN1_TYPE *av, char **attribute)
+void print_attribute(pTHX_ BIO *out, CONST_ASN1_TYPE *av, char **attribute)
 {
   char *value;
   const char *ln;
@@ -671,7 +691,7 @@ void print_attribute(pTHX_ BIO *out, const ASN1_TYPE *av, char **attribute)
 
 /* Generalised attribute print: handle PKCS#8 and bag attributes */
 
-int print_attribs(pTHX_ BIO *out, const STACK_OF(X509_ATTRIBUTE) *attrlst,
+int print_attribs(pTHX_ BIO *out, CONST_STACK_OF(X509_ATTRIBUTE) *attrlst,
                   const char *name, HV * hash)
 {
   X509_ATTRIBUTE *attr;
@@ -751,10 +771,10 @@ int print_attribs(pTHX_ BIO *out, const STACK_OF(X509_ATTRIBUTE) *attrlst,
   return 1;
 }
 
-static int alg_print(pTHX_ BIO *bio, const X509_ALGOR *alg, HV * parameters_hash)
+static int alg_print(pTHX_ BIO *bio, CONST_X509_ALGOR *alg, HV * parameters_hash)
 {
   int pbenid, aparamtype;
-  const ASN1_OBJECT *aoid;
+  CONST_ASN1_OBJECT *aoid;
   const void *aparam;
   PBEPARAM *pbe = NULL;
 
@@ -1189,11 +1209,11 @@ HV* info_as_hash(pkcs12, pwd = "")
   BIO *bio;
   STACK_OF(PKCS7) *asafes = NULL;
 
-  const ASN1_INTEGER *tmaciter;
-  const X509_ALGOR *macalgid;
-  const ASN1_OBJECT *macobj;
-  const ASN1_OCTET_STRING *tmac;
-  const ASN1_OCTET_STRING *tsalt;
+  CONST_ASN1_INTEGER *tmaciter;
+  CONST_X509_ALGOR *macalgid;
+  CONST_ASN1_OBJECT *macobj;
+  CONST_ASN1_OCTET_STRING *tmac;
+  CONST_ASN1_OCTET_STRING *tsalt;
 
   CODE:
   SV *value;
@@ -1256,11 +1276,11 @@ info(pkcs12, pwd = "")
   BIO *bio;
   STACK_OF(PKCS7) *asafes = NULL;
 
-  const ASN1_INTEGER *tmaciter;
-  const X509_ALGOR *macalgid;
-  const ASN1_OBJECT *macobj;
-  const ASN1_OCTET_STRING *tmac;
-  const ASN1_OCTET_STRING *tsalt;
+  CONST_ASN1_INTEGER *tmaciter;
+  CONST_X509_ALGOR *macalgid;
+  CONST_ASN1_OBJECT *macobj;
+  CONST_ASN1_OCTET_STRING *tmac;
+  CONST_ASN1_OCTET_STRING *tsalt;
 
   CODE:
 
