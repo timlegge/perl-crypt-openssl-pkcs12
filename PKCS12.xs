@@ -43,7 +43,7 @@
 #endif
 
 #if OPENSSL_VERSION_NUMBER < 0x30000000L
-CONST_ASN1_OBJECT *PKCS12_SAFEBAG_get0_bag_type(PKCS12_SAFEBAG *bag)
+CONST_ASN1_OBJECT *PKCS12_SAFEBAG_get0_bag_type(const PKCS12_SAFEBAG *bag)
 {
     return bag->value.bag->type;
 }
