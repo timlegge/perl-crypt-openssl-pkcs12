@@ -262,14 +262,25 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
           print_attribs(aTHX_ bio, PKCS8_pkey_get0_attrs(p8c), "Key Attributes", NULL);
           PEM_write_bio_PrivateKey (bio, pkey, enc, NULL, 0, NULL, pempass);
         }
+      } else {
+        PEM_write_bio_PrivateKey (bio, pkey, enc, NULL, 0, NULL, pempass);
       }
-      /*PEM_write_bio_PrivateKey (bio, pkey, enc, NULL, 0, NULL, pempass); */
 
       EVP_PKEY_free(pkey);
 
       break;
 
     case NID_pkcs8ShroudedKeyBag: ;
+
+      if (options & NOKEYS) return 1;
+
+      if ((p8 = PKCS12_decrypt_skey(bag, pass, passlen)) == NULL)
+        return 0;
+
+      if ((pkey = EVP_PKCS82PKEY (p8)) == NULL) {
+        PKCS8_PRIV_KEY_INFO_free(p8);
+        return 0;
+      }
 
       if (options & INFO) {
         CONST_X509_SIG *tp8;
@@ -295,16 +306,6 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
           print_attribs(aTHX_ bio, attrs, "Bag Attributes", NULL);
         }
       }
-      if (options & NOKEYS) return 1;
-
-      if ((p8 = PKCS12_decrypt_skey(bag, pass, passlen)) == NULL)
-        return 0;
-
-      if ((pkey = EVP_PKCS82PKEY (p8)) == NULL) {
-        PKCS8_PRIV_KEY_INFO_free(p8);
-        return 0;
-      }
-
       if (options & INFO) {
         if (bag_hv) {
           SV * value = newSVpvn("shrouded_keybag", strlen("shrouded_keybag"));
@@ -324,8 +325,9 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
           print_attribs(aTHX_ bio, PKCS8_pkey_get0_attrs(p8), "Key Attributes", NULL);
           PEM_write_bio_PrivateKey (bio, pkey, enc, NULL, 0, NULL, pempass);
         }
-      } else
-          PEM_write_bio_PrivateKey (bio, pkey, enc, NULL, 0, NULL, pempass);
+      } else {
+        PEM_write_bio_PrivateKey (bio, pkey, enc, NULL, 0, NULL, pempass);
+      }
 
       PKCS8_PRIV_KEY_INFO_free(p8);
 
@@ -371,14 +373,16 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
           dump_cert_text(bio, x509);
           PEM_write_bio_X509 (bio, x509);
         }
-      } else
+      } else {
         PEM_write_bio_X509 (bio, x509);
+      }
 
       X509_free(x509);
 
       break;
 
     case NID_secretBag:
+        //FIXME: Not sure how to test this
         if (options & INFO) {
           BIO_printf(bio, "Secret bag\n");
         if (bag_hv){
@@ -404,12 +408,14 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
         }
         break;
     case NID_safeContentsBag:
+        //FIXME: Not sure how to test this
         if (options & INFO) {
           BIO_printf(bio, "Safe Contents bag\n");
           if(bag_hv) {
             print_attribs(aTHX_ bio, attrs, "Bag Attributes", bag_hv);
-          } else
+          } else {
             print_attribs(aTHX_ bio, attrs, "Bag Attributes", NULL);
+          }
           dump_certs_pkeys_bags(aTHX_ bio, PKCS12_SAFEBAG_get0_safes(bag),
                                       pass, passlen, options, pempass, enc, bag_hv);
         }
