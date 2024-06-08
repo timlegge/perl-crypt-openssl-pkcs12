@@ -43,5 +43,6 @@ if ($Config{myuname} =~ /sunos|solaris/i) {
 } elsif ($Config{myuname} =~ /darwin/ ) {
   $args{LDDLFLAGS} = openssl_lib_paths() . " " . $Config{lddlflags};
 } else {
+  $args{LDDLFLAGS} = openssl_lib_paths() . " " . $Config{lddlflags};
   $args{OPTIMIZE} = $cc_option_flags;
 }
