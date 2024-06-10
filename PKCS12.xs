@@ -19,6 +19,7 @@
 #define CACERTS         0x10
 
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
+#define PKCS12_SAFEBAG_get0_safes(o) ((o)->value.safes)
 #define PKCS12_SAFEBAG_get0_p8inf(o) ((o)->value.keybag)
 #define PKCS12_SAFEBAG_get0_attr PKCS12_get_attr
 #define PKCS12_SAFEBAG_get_bag_nid M_PKCS12_cert_bag_type
@@ -33,6 +34,7 @@
 #define CONST_ASN1_INTEGER ASN1_INTEGER
 #define CONST_ASN1_OBJECT ASN1_OBJECT
 #define CONST_ASN1_OCTET_STRING ASN1_OCTET_STRING
+#define CONST_VOID void
 #else
 #define CONST_PKCS8_PRIV_KEY_INFO const PKCS8_PRIV_KEY_INFO
 #define CONST_X509_ALGOR const X509_ALGOR
@@ -43,10 +45,11 @@
 #define CONST_ASN1_INTEGER const ASN1_INTEGER
 #define CONST_ASN1_OBJECT const ASN1_OBJECT
 #define CONST_ASN1_OCTET_STRING const ASN1_OCTET_STRING
+#define CONST_VOID const void
 #endif
 
 #if OPENSSL_VERSION_NUMBER < 0x30000000L
-#include "p12_local.h"
+//#include "p12_local.h"
 #define PKCS12_SAFEBAG_get0_bag_type(o) (o->value.bag->type)
 #define PKCS12_SAFEBAG_get0_bag_obj(o) (o->value.bag->value.other)
 #endif
@@ -217,12 +220,15 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
 
   EVP_PKEY *pkey;
   X509 *x509;
-  PKCS8_PRIV_KEY_INFO *p8;
   CONST_PKCS8_PRIV_KEY_INFO *p8c;
-  CONST_STACK_OF(X509_ATTRIBUTE) *attrs;
+  CONST_STACK_OF(X509_ATTRIBUTE) *bag_attrs;
+  PKCS8_PRIV_KEY_INFO *p8;
+  CONST_STACK_OF(X509_ATTRIBUTE) *key_attrs;
 
-#if OPENSSL_VERSION_NUMBER >= 0x10000000L
-  attrs = PKCS12_SAFEBAG_get0_attrs(bag);
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+  bag_attrs = PKCS12_SAFEBAG_get0_attrs(bag);
+#else
+  bag_attrs = bag->attrib;
 #endif
 
 #ifndef OPENSSL_NO_DES
@@ -239,9 +245,17 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
 
       if (options & NOKEYS) return 1;
 
+#if OPENSSL_VERSION_NUMBER > 0x10100000L
       p8c = PKCS12_SAFEBAG_get0_p8inf(bag);
-
       if (!(pkey = EVP_PKCS82PKEY (p8c))) return 0;
+      key_attrs = PKCS8_pkey_get0_attrs(p8c);
+#else
+      PKCS8_PRIV_KEY_INFO *p8;
+      p8 = bag->value.keybag;
+      if (!(pkey = EVP_PKCS82PKEY(p8)))
+             return 0;
+      key_attrs = p8->attributes;
+#endif
 
       if (options & INFO) {
         if (bag_hv) {
@@ -256,10 +270,10 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
 
           if((hv_store(bag_hv, "key", strlen("key"), key_sv, 0)) == NULL)
             croak("unable to add certificate_bag to the bag_hv");
-          print_attribs(aTHX_ bio, PKCS8_pkey_get0_attrs(p8c), "Key Attributes", bag_hv);
+          print_attribs(aTHX_ bio, key_attrs, "Key Attributes", bag_hv);
         } else {
           BIO_printf(bio, "Key bag\n");
-          print_attribs(aTHX_ bio, PKCS8_pkey_get0_attrs(p8c), "Key Attributes", NULL);
+          print_attribs(aTHX_ bio, key_attrs, "Key Attributes", NULL);
           PEM_write_bio_PrivateKey (bio, pkey, enc, NULL, 0, NULL, pempass);
         }
       } else {
@@ -283,12 +297,16 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
       }
 
       if (options & INFO) {
+#if OPENSSL_VERSION_NUMBER > 0x10100000L
         CONST_X509_SIG *tp8;
         CONST_X509_ALGOR *tp8alg;
 
         tp8 = PKCS12_SAFEBAG_get0_pkcs8(bag);
         X509_SIG_get0(tp8, &tp8alg, NULL);
-
+#else
+        CONST_X509_ALGOR *tp8alg;      
+       tp8alg = bag->value.shkeybag->algor;
+#endif
         if (bag_hv) {
           SV * value = newSVpvn("shrouded_bag", strlen("shrouded_bag"));
           HV * parameters_hv = newHV();;
@@ -296,14 +314,14 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
             croak("unable to add type to the bag_hv");
 
           alg_print(aTHX_ bio, tp8alg, parameters_hv);
-          print_attribs(aTHX_ bio, attrs, "Bag Attributes", bag_hv);
+          print_attribs(aTHX_ bio, bag_attrs, "Bag Attributes", bag_hv);
 
           if((hv_store(bag_hv, "parameters", strlen("parameters"), newRV_inc((SV *) parameters_hv), 0)) == NULL)
             croak("unable to add bag_attributes to the bag_hv");
         } else {
           BIO_printf(bio, "Shrouded Keybag: ");
           alg_print(aTHX_ bio, tp8alg, NULL);
-          print_attribs(aTHX_ bio, attrs, "Bag Attributes", NULL);
+          print_attribs(aTHX_ bio, bag_attrs, "Bag Attributes", NULL);
         }
       }
       if (options & INFO) {
@@ -312,7 +330,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
           if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
             croak("unable to add type to the bag_hv");
 
-          print_attribs(aTHX_ bio, PKCS8_pkey_get0_attrs(p8), "Key Attributes", bag_hv);
+          print_attribs(aTHX_ bio, key_attrs, "Key Attributes", bag_hv);
 
           /* Assign the output to a temporary BIO and free after it is saved to key_sv */
           BIO *keybio = sv_bio_create();
@@ -322,7 +340,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
           if((hv_store(bag_hv, "key", strlen("key"), key_sv, 0)) == NULL)
             croak("unable to add certificate_bag to the bag_hv");
         } else {
-          print_attribs(aTHX_ bio, PKCS8_pkey_get0_attrs(p8), "Key Attributes", NULL);
+          print_attribs(aTHX_ bio, key_attrs, "Key Attributes", NULL);
           PEM_write_bio_PrivateKey (bio, pkey, enc, NULL, 0, NULL, pempass);
         }
       } else {
@@ -354,7 +372,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
       if (options & INFO) {
         if (bag_hv) {
           SV * value = newSVpvn("certificate_bag", strlen("certificate_bag"));
-          print_attribs(aTHX_ bio, attrs, "Bag Attributes", bag_hv);
+          print_attribs(aTHX_ bio, bag_attrs, "Bag Attributes", bag_hv);
           if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
             croak("unable to add type to the bag_hv");
           if((hv_store(bag_hv, "subject", strlen("subject"), get_cert_subject_name(aTHX_ x509), 0)) == NULL)
@@ -369,7 +387,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
         } else
         {
           BIO_printf(bio, "Certificate bag\n");
-          print_attribs(aTHX_ bio, attrs, "Bag Attributes", NULL);
+          print_attribs(aTHX_ bio, bag_attrs, "Bag Attributes", NULL);
           dump_cert_text(bio, x509);
           PEM_write_bio_X509 (bio, x509);
         }
@@ -386,10 +404,10 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
         if (options & INFO) {
           BIO_printf(bio, "Secret bag\n");
         if (bag_hv){
-          print_attribs(aTHX_ bio, attrs, "Bag Attributes", bag_hv);
+          print_attribs(aTHX_ bio, bag_attrs, "Bag Attributes", bag_hv);
         }
         else
-          print_attribs(aTHX_ bio, attrs, "Bag Attributes", NULL);
+          print_attribs(aTHX_ bio, bag_attrs, "Bag Attributes", NULL);
           BIO_printf(bio, "Bag Type: ");
         }
         i2a_ASN1_OBJECT(bio, PKCS12_SAFEBAG_get0_bag_type(bag));
@@ -412,9 +430,9 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
         if (options & INFO) {
           BIO_printf(bio, "Safe Contents bag\n");
           if(bag_hv) {
-            print_attribs(aTHX_ bio, attrs, "Bag Attributes", bag_hv);
+            print_attribs(aTHX_ bio, bag_attrs, "Bag Attributes", bag_hv);
           } else {
-            print_attribs(aTHX_ bio, attrs, "Bag Attributes", NULL);
+            print_attribs(aTHX_ bio, bag_attrs, "Bag Attributes", NULL);
           }
           dump_certs_pkeys_bags(aTHX_ bio, PKCS12_SAFEBAG_get0_safes(bag),
                                       pass, passlen, options, pempass, enc, bag_hv);
@@ -782,7 +800,7 @@ static int alg_print(pTHX_ BIO *bio, CONST_X509_ALGOR *alg, HV * parameters_hash
 {
   int pbenid, aparamtype;
   CONST_ASN1_OBJECT *aoid;
-  const void *aparam;
+  CONST_VOID *aparam;
   PBEPARAM *pbe = NULL;
 
   X509_ALGOR_get0(&aoid, &aparamtype, &aparam, alg);
@@ -848,9 +866,14 @@ static int alg_print(pTHX_ BIO *bio, CONST_X509_ALGOR *alg, HV * parameters_hash
         if((hv_store(parameters_hash, "iteration", strlen("iteration"), iteration, 0)) == NULL)
           croak("unable to add iteration to the parameters_hash");
       } else
+#if OPENSSL_VERSION_NUMBER > 0x10100000L
         BIO_printf(bio, ", Iteration %ld, PRF %s",
+#else
+        BIO_printf(bio, ", Iteration %ld, PRF %s",
+#endif
                        ASN1_INTEGER_get(kdf->iter), OBJ_nid2sn(prfnid));
       PBKDF2PARAM_free(kdf);
+#if OPENSSL_VERSION_NUMBER > 0x10100000L
 #ifndef OPENSSL_NO_SCRYPT
       } else if (pbenid == NID_id_scrypt) {
         SCRYPT_PARAMS *kdf = NULL;
@@ -879,6 +902,7 @@ static int alg_print(pTHX_ BIO *bio, CONST_X509_ALGOR *alg, HV * parameters_hash
                        ASN1_INTEGER_get(kdf->parallelizationParameter));
         SCRYPT_PARAMS_free(kdf);
 #endif
+#endif
     }
     PBE2PARAM_free(pbe2);
   } else {
@@ -893,7 +917,11 @@ static int alg_print(pTHX_ BIO *bio, CONST_X509_ALGOR *alg, HV * parameters_hash
         if((hv_store(parameters_hash, "iteration", strlen("iteration"), iteration, 0)) == NULL)
           croak("unable to add MAC to the parameters_hash");
       } else
+#if OPENSSL_VERSION_NUMBER > 0x10100000L
         BIO_printf(bio, ", Iteration %ld", ASN1_INTEGER_get(pbe->iter));
+#else
+        BIO_printf(bio, ", Iteration %ld", ASN1_INTEGER_get(pbe->iter));
+#endif
       PBEPARAM_free(pbe);
   }
   done:
@@ -1232,13 +1260,16 @@ HV* info_as_hash(pkcs12, pwd = "")
   if ((asafes = PKCS12_unpack_authsafes(pkcs12)) == NULL)
         RETVAL = newHV();
   /*asafes = PKCS12_unpack_authsafes(pkcs12); */
-
+#if OPENSSL_VERSION_NUMBER > 0x10100000L
   PKCS12_get0_mac(&tmac, &macalgid, &tsalt, &tmaciter, pkcs12);
   /* current hash algorithms do not use parameters so extract just name,
      in future alg_print() may be needed */
   X509_ALGOR_get0(&macobj, NULL, NULL, macalgid);
   i2a_ASN1_OBJECT(bio, macobj);
-
+#else
+  tmaciter = pkcs12->mac->iter;
+  tmac = pkcs12->mac;
+#endif
   SV * mac_iteration = newSViv (tmaciter != NULL ? ASN1_INTEGER_get(tmaciter) : 1L);
   value = sv_bio_final(bio);
   HV * mac = newHV();
@@ -1295,19 +1326,45 @@ info(pkcs12, pwd = "")
 
   if ((asafes = PKCS12_unpack_authsafes(pkcs12)) == NULL)
         RETVAL = newSVpvn("",0);
-
+#if OPENSSL_VERSION_NUMBER > 0x10100000L
   PKCS12_get0_mac(&tmac, &macalgid, &tsalt, &tmaciter, pkcs12);
   /* current hash algorithms do not use parameters so extract just name,
      in future alg_print() may be needed */
   X509_ALGOR_get0(&macobj, NULL, NULL, macalgid);
+  i2a_ASN1_OBJECT(bio, macobj);
+  X509_ALGOR_get0(&macobj, NULL, NULL, macalgid);
   BIO_puts(bio, "MAC: ");
   i2a_ASN1_OBJECT(bio, macobj);
+#else
+  tmaciter = pkcs12->mac->iter;
+  tmac = pkcs12->mac;
+#endif
+  /* current hash algorithms do not use parameters so extract just name,
+     in future alg_print() may be needed */
+#if OPENSSL_VERSION_NUMBER > 0x10100000L
   BIO_printf(bio, ", Iteration %ld\n",
         tmaciter != NULL ? ASN1_INTEGER_get(tmaciter) : 1L);
   BIO_printf(bio, "MAC length: %ld, salt length: %ld\n",
         tmac != NULL ? ASN1_STRING_length(tmac) : 0L,
         tsalt != NULL ? ASN1_STRING_length(tsalt) : 0L);
-
+#else
+  BIO_printf(bio, "MAC Iteration %ld\n",
+        tmaciter != NULL ? ASN1_INTEGER_get(tmaciter) : 1L);
+  /* If we enter empty password try no password first */
+  int cpass = 0;
+  int twopass = 0;
+  if (!pwd[0] && PKCS12_verify_mac(pkcs12, NULL, 0)) {
+    /* If mac and crypto pass the same set it to NULL too */
+    if (!twopass)
+      cpass = NULL;
+  } else if (!PKCS12_verify_mac(pkcs12, pwd, -1)) {
+    BIO_printf(bio, "Mac verify error: invalid password?\n");
+    ERR_print_errors(bio);
+    goto end;
+  }
+  BIO_printf(bio, "MAC verified OK\n");
+#endif
+  end:
   dump_certs_keys_p12(aTHX_ bio, pkcs12, pwd, strlen(pwd), INFO, NULL, NULL);
 
   RETVAL = sv_bio_final(bio);

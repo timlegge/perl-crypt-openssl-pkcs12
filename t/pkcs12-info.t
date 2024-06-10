@@ -2,9 +2,10 @@ use strict;
 use warnings;
 use Test::More;
 use Digest::SHA qw/sha256_hex/;
+use Crypt::OpenSSL::Guess qw/openssl_version/;
 
+my ($major, $minor, $patch) = openssl_version();
 BEGIN { use_ok('Crypt::OpenSSL::PKCS12') };
-
 my $openssl_output =<< 'OPENSSL_END';
 MAC: sha1, Iteration 2048
 MAC length: 20, salt length: 8
@@ -78,7 +79,10 @@ edjrMOH641LwWMcQSK3FhAQbt4qUUytEdSEYTy4ObpScWrxEt67lcWu4yIJxu7e4
 0HErfonOx1g+Ox0=
 -----END PRIVATE KEY-----
 OPENSSL_END
-
+if ($major eq '1.0') {
+  $openssl_output =~ s/MAC: sha1, Iteration 2048/MAC Iteration 2048/g;
+  $openssl_output =~ s/MAC length: .*/MAC verified OK/;
+}
 my $pass   = "testing";
 #my $pkcs12 = Crypt::OpenSSL::PKCS12->new_from_file('certs/test.p12');
 my $pkcs12 = Crypt::OpenSSL::PKCS12->new_from_file('certs/test_le_1.1.p12');
@@ -86,15 +90,18 @@ my $pkcs12 = Crypt::OpenSSL::PKCS12->new_from_file('certs/test_le_1.1.p12');
 #my $certificate = $pkcs12->certificate($pass);
 
 my $info = $pkcs12->info($pass);
+
 ok(sha256_hex($info) eq sha256_hex($openssl_output), "Output matches OpenSSL");
 
 my $info_hash = $pkcs12->info_as_hash($pass);
 
-like($info_hash->{mac}{digest}, qr/sha1/, "MAC Digest is sha1");
-like($info_hash->{mac}{iteration}, qr/2048/, "MAC Iteration is 2048");
-like($info_hash->{mac}{length}, qr/20/, "MAC length is 20");
-like($info_hash->{mac}{salt_length}, qr/8/, "MAC salt_length is 8");
+if ($major gt '1.0') {
+  like($info_hash->{mac}{digest}, qr/sha1/, "MAC Digest is sha1");
+  like($info_hash->{mac}{length}, qr/20/, "MAC length is 20");
+  like($info_hash->{mac}{salt_length}, qr/8/, "MAC salt_length is 8");
+}
 
+like($info_hash->{mac}{iteration}, qr/2048/, "MAC Iteration is 2048");
 my $bags = $info_hash->{pkcs7_data}->{bags};
 
 is(scalar @$bags, 1, "One bag in pkcs7_data");
