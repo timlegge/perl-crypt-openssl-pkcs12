@@ -49,7 +49,7 @@
 #endif
 
 #if OPENSSL_VERSION_NUMBER < 0x30000000L
-//#include "p12_local.h"
+#include "p12_local.h"
 #define PKCS12_SAFEBAG_get0_bag_type(o) (o->value.bag->type)
 #define PKCS12_SAFEBAG_get0_bag_obj(o) (o->value.bag->value.other)
 #endif
@@ -290,7 +290,6 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
 
       if ((p8 = PKCS12_decrypt_skey(bag, pass, passlen)) == NULL)
         return 0;
-
       if ((pkey = EVP_PKCS82PKEY (p8)) == NULL) {
         PKCS8_PRIV_KEY_INFO_free(p8);
         return 0;
@@ -312,15 +311,17 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
           HV * parameters_hv = newHV();;
           if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
             croak("unable to add type to the bag_hv");
-
+#if OPENSSL_VERSION_NUMBER > 0x10100000L
           alg_print(aTHX_ bio, tp8alg, parameters_hv);
+#endif
           print_attribs(aTHX_ bio, bag_attrs, "Bag Attributes", bag_hv);
-
           if((hv_store(bag_hv, "parameters", strlen("parameters"), newRV_inc((SV *) parameters_hv), 0)) == NULL)
             croak("unable to add bag_attributes to the bag_hv");
         } else {
           BIO_printf(bio, "Shrouded Keybag: ");
+//#if OPENSSL_VERSION_NUMBER > 0x10100000L
           alg_print(aTHX_ bio, tp8alg, NULL);
+//#endif
           print_attribs(aTHX_ bio, bag_attrs, "Bag Attributes", NULL);
         }
       }
@@ -739,7 +740,7 @@ int print_attribs(pTHX_ BIO *out, CONST_STACK_OF(X509_ATTRIBUTE) *attrlst,
       /*if((hv_store(hash, "attributes", strlen("attributes"), newRV_inc((SV *) bags_av), 0)) == NULL) */
       /*  croak("unable to add attributes to the hash"); */
     } else
-      BIO_printf(out, "%s: <Empty Attributes>\n", name);
+      BIO_printf(out, "%s: <TIMEmpty Attributes>\n", name);
     return 1;
   }
   if(!hash)
@@ -1259,6 +1260,7 @@ HV* info_as_hash(pkcs12, pwd = "")
 
   if ((asafes = PKCS12_unpack_authsafes(pkcs12)) == NULL)
         RETVAL = newHV();
+  HV * mac = newHV();
   /*asafes = PKCS12_unpack_authsafes(pkcs12); */
 #if OPENSSL_VERSION_NUMBER > 0x10100000L
   PKCS12_get0_mac(&tmac, &macalgid, &tsalt, &tmaciter, pkcs12);
@@ -1266,20 +1268,17 @@ HV* info_as_hash(pkcs12, pwd = "")
      in future alg_print() may be needed */
   X509_ALGOR_get0(&macobj, NULL, NULL, macalgid);
   i2a_ASN1_OBJECT(bio, macobj);
-#else
-  tmaciter = pkcs12->mac->iter;
-  tmac = pkcs12->mac;
-#endif
-  SV * mac_iteration = newSViv (tmaciter != NULL ? ASN1_INTEGER_get(tmaciter) : 1L);
   value = sv_bio_final(bio);
-  HV * mac = newHV();
-
   if((hv_store(mac, "digest", strlen("digest"), value, 0)) == NULL)
     croak("unable to add digest to the hash");
+#else
+  tmaciter = pkcs12->mac->iter;
+  //tmac = pkcs12->mac;
+#endif
+  SV * mac_iteration = newSViv (tmaciter != NULL ? ASN1_INTEGER_get(tmaciter) : 1L);
 
   if((hv_store(mac, "iteration", strlen("iteration"), mac_iteration, 0)) == NULL)
     croak("unable to add iteration to the hash");
-
   bio = sv_bio_create();
   /* BIO_printf(bio, "MAC length: %ld, salt length: %ld", */
   SV * mac_len = newSViv(tmac != NULL ? ASN1_STRING_length(tmac) : 0L);
@@ -1330,8 +1329,8 @@ info(pkcs12, pwd = "")
   PKCS12_get0_mac(&tmac, &macalgid, &tsalt, &tmaciter, pkcs12);
   /* current hash algorithms do not use parameters so extract just name,
      in future alg_print() may be needed */
-  X509_ALGOR_get0(&macobj, NULL, NULL, macalgid);
-  i2a_ASN1_OBJECT(bio, macobj);
+  //X509_ALGOR_get0(&macobj, NULL, NULL, macalgid);
+  //i2a_ASN1_OBJECT(bio, macobj);
   X509_ALGOR_get0(&macobj, NULL, NULL, macalgid);
   BIO_puts(bio, "MAC: ");
   i2a_ASN1_OBJECT(bio, macobj);
