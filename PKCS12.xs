@@ -25,7 +25,6 @@
 #define PKCS12_SAFEBAG_get_bag_nid M_PKCS12_cert_bag_type
 #define PKCS12_SAFEBAG_get_nid M_PKCS12_bag_type
 #define PKCS12_SAFEBAG_get1_cert PKCS12_certbag2x509
-#define CONST_PKCS8_PRIV_KEY_INFO PKCS8_PRIV_KEY_INFO
 #define CONST_X509_ALGOR X509_ALGOR
 #define CONST_X509_SIG X509_SIG
 #define CONST_ASN1_TYPE ASN1_TYPE
@@ -36,7 +35,6 @@
 #define CONST_ASN1_OCTET_STRING ASN1_OCTET_STRING
 #define CONST_VOID void
 #else
-#define CONST_PKCS8_PRIV_KEY_INFO const PKCS8_PRIV_KEY_INFO
 #define CONST_X509_ALGOR const X509_ALGOR
 #define CONST_X509_SIG const X509_SIG
 #define CONST_ASN1_TYPE const ASN1_TYPE
@@ -46,6 +44,12 @@
 #define CONST_ASN1_OBJECT const ASN1_OBJECT
 #define CONST_ASN1_OCTET_STRING const ASN1_OCTET_STRING
 #define CONST_VOID const void
+#endif
+
+#if OPENSSL_VERSION_NUMBER < 0x10102000L
+#define CONST_PKCS8_PRIV_KEY_INFO PKCS8_PRIV_KEY_INFO
+#else
+#define CONST_PKCS8_PRIV_KEY_INFO const PKCS8_PRIV_KEY_INFO
 #endif
 
 #if OPENSSL_VERSION_NUMBER < 0x30000000L
@@ -222,7 +226,6 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
 
   EVP_PKEY *pkey;
   X509 *x509;
-  CONST_PKCS8_PRIV_KEY_INFO *p8c;
   CONST_PKCS8_PRIV_KEY_INFO *p8;
   CONST_STACK_OF(X509_ATTRIBUTE) *bag_attrs;
   CONST_STACK_OF(X509_ATTRIBUTE) *key_attrs;
@@ -295,7 +298,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
         PKCS8_PRIV_KEY_INFO_free(p8);
         return 0;
       }
-
+      key_attrs = PKCS8_pkey_get0_attrs(p8);
 #else
       if (!(p8 = PKCS12_decrypt_skey(bag, pass, passlen)))
              return 0;
@@ -303,6 +306,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
              PKCS8_PRIV_KEY_INFO_free(p8);
              return 0;
          }
+      key_attrs = p8->attributes;
 #endif
       if (options & INFO) {
 #if OPENSSL_VERSION_NUMBER > 0x10100000L
@@ -340,7 +344,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
           if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
             croak("unable to add type to the bag_hv");
 
-          print_attribs(aTHX_ bio, p8->attributes, "Key Attributes", bag_hv);
+          print_attribs(aTHX_ bio, key_attrs, "Key Attributes", bag_hv);
 
           /* Assign the output to a temporary BIO and free after it is saved to key_sv */
           BIO *keybio = sv_bio_create();
@@ -350,7 +354,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
           if((hv_store(bag_hv, "key", strlen("key"), key_sv, 0)) == NULL)
             croak("unable to add certificate_bag to the bag_hv");
         } else {
-          print_attribs(aTHX_ bio, p8->attributes, "Key Attributes", NULL);
+          print_attribs(aTHX_ bio, key_attrs, "Key Attributes", NULL);
           PEM_write_bio_PrivateKey (bio, pkey, enc, NULL, 0, NULL, pempass);
         }
       } else {
@@ -725,8 +729,7 @@ void print_attribute(pTHX_ BIO *out, CONST_ASN1_TYPE *av, char **attribute)
 }
 
 /* Generalised attribute print: handle PKCS#8 and bag attributes */
-//CONST_STACK_OF(X509_ATTRIBUTE)
-int print_attribs(pTHX_ BIO *out, STACK_OF(X509_ATTRIBUTE) *attrlst,
+int print_attribs(pTHX_ BIO *out, CONST_STACK_OF(X509_ATTRIBUTE) *attrlst,
                   const char *name, HV * hash)
 {
   X509_ATTRIBUTE *attr;
