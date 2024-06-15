@@ -52,10 +52,10 @@
 #define CONST_PKCS8_PRIV_KEY_INFO const PKCS8_PRIV_KEY_INFO
 #endif
 
-#if OPENSSL_VERSION_NUMBER < 0x30000000L
-#if OPENSSL_VERSION_NUMBER > 0x10100000L
+#if OPENSSL_VERSION_NUMBER < 0x1000000fL
 #include "p12_local.h"
 #endif
+#if OPENSSL_VERSION_NUMBER < 0x30000000L
 #define PKCS12_SAFEBAG_get0_bag_type(o) (o->value.bag->type)
 #define PKCS12_SAFEBAG_get0_bag_obj(o) (o->value.bag->value.other)
 #endif
@@ -1260,14 +1260,15 @@ HV* info_as_hash(pkcs12, pwd = "")
   STACK_OF(PKCS7) *asafes = NULL;
 
   CONST_ASN1_INTEGER *tmaciter;
+#if OPENSSL_VERSION_NUMBER > 0x10100000L
+  SV *value;
   CONST_X509_ALGOR *macalgid;
   CONST_ASN1_OBJECT *macobj;
   CONST_ASN1_OCTET_STRING *tmac;
   CONST_ASN1_OCTET_STRING *tsalt;
+#endif
 
   CODE:
-  SV *value;
-
   RETVAL = newHV();
 
   bio = sv_bio_create();
@@ -1287,7 +1288,6 @@ HV* info_as_hash(pkcs12, pwd = "")
     croak("unable to add digest to the hash");
 #else
   tmaciter = pkcs12->mac->iter;
-  tmac = pkcs12->mac;
 #endif
   SV * mac_iteration = newSViv (tmaciter != NULL ? ASN1_INTEGER_get(tmaciter) : 1L);
 
@@ -1295,11 +1295,15 @@ HV* info_as_hash(pkcs12, pwd = "")
     croak("unable to add iteration to the hash");
   bio = sv_bio_create();
   /* BIO_printf(bio, "MAC length: %ld, salt length: %ld", */
+#if OPENSSL_VERSION_NUMBER > 0x10100000L
   SV * mac_len = newSViv(tmac != NULL ? ASN1_STRING_length(tmac) : 0L);
   SV * salt_len = newSViv(tsalt != NULL ? ASN1_STRING_length(tsalt) : 0L);
 
   if((hv_store(mac, "length", 6, mac_len, 0)) == NULL)
     croak("unable to add length to the hash");
+#else
+  SV * salt_len = newSViv((pkcs12)->mac ? pkcs12->mac->salt->length : 0L);
+#endif
 
   if((hv_store(mac, "salt_length", strlen("salt_length"), INT2PTR(SV*, salt_len), 0)) == NULL)
     croak("unable to add salt_length to the hash");
@@ -1328,11 +1332,12 @@ info(pkcs12, pwd = "")
   STACK_OF(PKCS7) *asafes = NULL;
 
   CONST_ASN1_INTEGER *tmaciter;
+#if OPENSSL_VERSION_NUMBER > 0x10100000L
   CONST_X509_ALGOR *macalgid;
   CONST_ASN1_OBJECT *macobj;
   CONST_ASN1_OCTET_STRING *tmac;
   CONST_ASN1_OCTET_STRING *tsalt;
-
+#endif
   CODE:
 
   bio = sv_bio_create();
@@ -1343,34 +1348,22 @@ info(pkcs12, pwd = "")
   PKCS12_get0_mac(&tmac, &macalgid, &tsalt, &tmaciter, pkcs12);
   /* current hash algorithms do not use parameters so extract just name,
      in future alg_print() may be needed */
-  //X509_ALGOR_get0(&macobj, NULL, NULL, macalgid);
-  //i2a_ASN1_OBJECT(bio, macobj);
   X509_ALGOR_get0(&macobj, NULL, NULL, macalgid);
   BIO_puts(bio, "MAC: ");
   i2a_ASN1_OBJECT(bio, macobj);
-#else
-  tmaciter = pkcs12->mac->iter;
-  tmac = pkcs12->mac;
-#endif
   /* current hash algorithms do not use parameters so extract just name,
      in future alg_print() may be needed */
-#if OPENSSL_VERSION_NUMBER > 0x10100000L
   BIO_printf(bio, ", Iteration %ld\n",
         tmaciter != NULL ? ASN1_INTEGER_get(tmaciter) : 1L);
   BIO_printf(bio, "MAC length: %ld, salt length: %ld\n",
         tmac != NULL ? ASN1_STRING_length(tmac) : 0L,
         tsalt != NULL ? ASN1_STRING_length(tsalt) : 0L);
 #else
+  tmaciter = pkcs12->mac->iter;
   BIO_printf(bio, "MAC Iteration %ld\n",
         tmaciter != NULL ? ASN1_INTEGER_get(tmaciter) : 1L);
   /* If we enter empty password try no password first */
-  int cpass = 0;
-  int twopass = 0;
-  if (!pwd[0] && PKCS12_verify_mac(pkcs12, NULL, 0)) {
-    /* If mac and crypto pass the same set it to NULL too */
-    if (!twopass)
-      cpass = NULL;
-  } else if (!PKCS12_verify_mac(pkcs12, pwd, -1)) {
+  if (!PKCS12_verify_mac(pkcs12, pwd, -1)) {
     BIO_printf(bio, "Mac verify error: invalid password?\n");
     ERR_print_errors(bio);
     goto end;
