@@ -52,9 +52,6 @@
 #define CONST_PKCS8_PRIV_KEY_INFO const PKCS8_PRIV_KEY_INFO
 #endif
 
-#if OPENSSL_VERSION_NUMBER < 0x10200000L
-#include "p12_local.h"
-#endif
 #if OPENSSL_VERSION_NUMBER < 0x30000000L
 #define PKCS12_SAFEBAG_get0_bag_type(o) (o->value.bag->type)
 #define PKCS12_SAFEBAG_get0_bag_obj(o) (o->value.bag->value.other)
@@ -418,6 +415,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
 
       break;
 
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
     case NID_secretBag:
         //FIXME: Not sure how to test this
         if (options & INFO) {
@@ -444,6 +442,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
           Safefree(attribute_value);
         }
         break;
+#endif
     case NID_safeContentsBag:
         //FIXME: Not sure how to test this
         if (options & INFO) {
