@@ -46,7 +46,7 @@
 #define CONST_VOID const void
 #endif
 
-#if OPENSSL_VERSION_NUMBER < 0x10102000L
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
 #define CONST_PKCS8_PRIV_KEY_INFO PKCS8_PRIV_KEY_INFO
 #else
 #define CONST_PKCS8_PRIV_KEY_INFO const PKCS8_PRIV_KEY_INFO
@@ -226,7 +226,8 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
 
   EVP_PKEY *pkey;
   X509 *x509;
-  CONST_PKCS8_PRIV_KEY_INFO *p8;
+  PKCS8_PRIV_KEY_INFO *p8;
+  const PKCS8_PRIV_KEY_INFO *p8c;
   CONST_STACK_OF(X509_ATTRIBUTE) *bag_attrs;
   CONST_STACK_OF(X509_ATTRIBUTE) *key_attrs;
 
@@ -251,9 +252,9 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
       if (options & NOKEYS) return 1;
 
 #if OPENSSL_VERSION_NUMBER > 0x10100000L
-      p8 = PKCS12_SAFEBAG_get0_p8inf(bag);
-      if (!(pkey = EVP_PKCS82PKEY (p8))) return 0;
-      key_attrs = PKCS8_pkey_get0_attrs(p8);
+      p8c = PKCS12_SAFEBAG_get0_p8inf(bag);
+      if (!(pkey = EVP_PKCS82PKEY (p8c))) return 0;
+      key_attrs = PKCS8_pkey_get0_attrs(p8c);
 #else
       p8 = bag->value.keybag;
       if (!(pkey = EVP_PKCS82PKEY(p8)))
@@ -292,13 +293,12 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
 
       if (options & NOKEYS) return 1;
 #if OPENSSL_VERSION_NUMBER > 0x10100000L
-      if ((p8 = PKCS12_decrypt_skey(bag, pass, passlen)) == NULL)
+      if ((p8c = PKCS12_decrypt_skey(bag, pass, passlen)) == NULL)
         return 0;
-      if ((pkey = EVP_PKCS82PKEY (p8)) == NULL) {
-        PKCS8_PRIV_KEY_INFO_free(p8);
+      if ((pkey = EVP_PKCS82PKEY (p8c)) == NULL) {
         return 0;
       }
-      key_attrs = PKCS8_pkey_get0_attrs(p8);
+      key_attrs = PKCS8_pkey_get0_attrs(p8c);
 #else
       if (!(p8 = PKCS12_decrypt_skey(bag, pass, passlen)))
              return 0;
@@ -316,8 +316,8 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
         tp8 = PKCS12_SAFEBAG_get0_pkcs8(bag);
         X509_SIG_get0(tp8, &tp8alg, NULL);
 #else
-        CONST_X509_ALGOR *tp8alg;	
-	tp8alg = bag->value.shkeybag->algor;
+        CONST_X509_ALGOR *tp8alg;
+        tp8alg = bag->value.shkeybag->algor;
 #endif
         if (bag_hv) {
           SV * value = newSVpvn("shrouded_bag", strlen("shrouded_bag"));
