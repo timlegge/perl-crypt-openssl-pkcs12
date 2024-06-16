@@ -52,6 +52,7 @@
 #define CONST_PKCS8_PRIV_KEY_INFO const PKCS8_PRIV_KEY_INFO
 #endif
 
+#include "p12_local.h"
 #if OPENSSL_VERSION_NUMBER < 0x1000000fL
 #include "p12_local.h"
 #endif
@@ -226,8 +227,11 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
 
   EVP_PKEY *pkey;
   X509 *x509;
+#if OPENSSL_VERSION_NUMBER <= 0x10100000L
   PKCS8_PRIV_KEY_INFO *p8;
+#else
   const PKCS8_PRIV_KEY_INFO *p8c;
+#endif
   CONST_STACK_OF(X509_ATTRIBUTE) *bag_attrs;
   CONST_STACK_OF(X509_ATTRIBUTE) *key_attrs;
 
@@ -361,7 +365,9 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
         PEM_write_bio_PrivateKey (bio, pkey, enc, NULL, 0, NULL, pempass);
       }
 
+#if OPENSSL_VERSION_NUMBER <= 0x10100000L
       PKCS8_PRIV_KEY_INFO_free(p8);
+#endif
 
       EVP_PKEY_free(pkey);
 
@@ -1369,8 +1375,8 @@ info(pkcs12, pwd = "")
     goto end;
   }
   BIO_printf(bio, "MAC verified OK\n");
-#endif
   end:
+#endif
   dump_certs_keys_p12(aTHX_ bio, pkcs12, pwd, strlen(pwd), INFO, NULL, NULL);
 
   RETVAL = sv_bio_final(bio);
