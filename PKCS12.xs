@@ -555,10 +555,17 @@ static unsigned long nmflag = 0;
 static char nmflag_set = 0;
 # define XN_FLAG_SPC_EQ          (1 << 23)/* Put spaces round '=' */
 
+#define CHARTYPE_BS_ESC         (ASN1_STRFLGS_ESC_2253 | CHARTYPE_FIRST_ESC_2253 | CHARTYPE_LAST_ESC_2253)
+
+#define ESC_FLAGS (ASN1_STRFLGS_ESC_2253 | \
+                   ASN1_STRFLGS_ESC_QUOTE | \
+                   ASN1_STRFLGS_ESC_CTRL | \
+                   ASN1_STRFLGS_ESC_MSB)
+
 unsigned long get_nameopt(void)
 {
   return
-      nmflag_set ? nmflag : XN_FLAG_SEP_CPLUS_SPC | ASN1_STRFLGS_UTF8_CONVERT | XN_FLAG_SPC_EQ;
+      nmflag_set ? nmflag : ESC_FLAGS | XN_FLAG_SEP_CPLUS_SPC | ASN1_STRFLGS_UTF8_CONVERT | XN_FLAG_SPC_EQ;
 }
 
 void print_name(BIO *out, const char *title, CONST_X509_NAME *nm)
@@ -627,7 +634,7 @@ void hex_prin(BIO *out, unsigned char *buf, int len)
 {
   int i;
   for (i = 0; i < len; i++)
-  BIO_printf(out, "%02X ", buf[i]);
+      BIO_printf(out, "%02X ", buf[i]);
 }
 
 /* Generalised x509 attribute value print */
@@ -682,7 +689,7 @@ void print_attribute(pTHX_ BIO *out, CONST_ASN1_TYPE *av, char **attribute)
     }
     break;
 
-  case V_ASN1_OBJECT:
+  /* case V_ASN1_OBJECT:
     ln = OBJ_nid2ln(OBJ_obj2nid(av->value.object));
     if (!ln)
       ln = "";
@@ -695,9 +702,10 @@ void print_attribute(pTHX_ BIO *out, CONST_ASN1_TYPE *av, char **attribute)
       BIO_printf(out, "\n");
     }
     break;
-
+*/
   default:
-    BIO_printf(out, "<Unsupported tag %d>\n", av->type);
+    if(*attribute == NULL)
+      BIO_printf(out, "<Unsupported tag %d>\n", av->type);
     break;
   }
 }
@@ -726,7 +734,7 @@ int print_attribs(pTHX_ BIO *out, CONST_STACK_OF(X509_ATTRIBUTE) *attrlst,
       /*if((hv_store(hash, "attributes", strlen("attributes"), newRV_inc((SV *) bags_av), 0)) == NULL) */
       /*  croak("unable to add attributes to the hash"); */
     } else
-      BIO_printf(out, "%s: <TIMEmpty Attributes>\n", name);
+      BIO_printf(out, "%s: <Empty Attributes>\n", name);
     return 1;
   }
   if(!hash)
@@ -739,6 +747,7 @@ int print_attribs(pTHX_ BIO *out, CONST_STACK_OF(X509_ATTRIBUTE) *attrlst,
     attr_obj = X509_ATTRIBUTE_get0_object(attr);
     attr_nid = OBJ_obj2nid(attr_obj);
     if (attr_nid == NID_undef && !hash) {
+      BIO_printf(out, "    ");
       i2a_ASN1_OBJECT(out, attr_obj);
       BIO_printf(out, ": ");
     } else {
@@ -767,6 +776,7 @@ int print_attribs(pTHX_ BIO *out, CONST_STACK_OF(X509_ATTRIBUTE) *attrlst,
             }
           }
         } else {
+          //BIO_printf(out, "    ");
           print_attribute(aTHX_ out, av, &attribute_value);
         }
         Safefree(attribute_value);
@@ -1278,6 +1288,7 @@ HV* info_as_hash(pkcs12, pwd = "")
   dump_certs_keys_p12(aTHX_ bio, pkcs12, pwd, strlen(pwd), INFO, NULL, RETVAL);
 
   SV * end = sv_bio_final(bio);
+
   if (SvCUR(end) != 0)
     warn("bio from info_as_hash should be zero length - report issue");
 
