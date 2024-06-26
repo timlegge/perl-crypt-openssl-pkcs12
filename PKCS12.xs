@@ -136,9 +136,9 @@ STACK_OF(X509)* _load_cert_chain(char* keyString, STACK_OF(X509_INFO)*(*p_loader
 }
 
 #if OPENSSL_VERSION_NUMBER >= 0x30000000L
-long bio_write_cb(struct bio_st *bm, int m, const char *ptr, size_t len, int l, long x, int y, size_t *processed) {
+long bio_write_cb(pTHX_ struct bio_st *bm, int m, const char *ptr, size_t len, int l, long x, int y, size_t *processed) {
 #else
-long bio_write_cb(struct bio_st *bm, int m, const char *ptr, int len, long x, long y) {
+long bio_write_cb(pTHX_ struct bio_st *bm, int m, const char *ptr, int len, long x, long y) {
 #endif
 /* stolen from OpenSSL.xs */
 
@@ -209,7 +209,7 @@ static const char *ssl_error(void) {
   ERR_print_errors(bio);
   sv = sv_bio_final(bio);
   ERR_clear_error();
-  return SvPV(sv, l);
+  return SvPV(aTHX_ sv, l);
 }
 
 /* these are trimmed from their openssl/apps/pkcs12.c counterparts */
@@ -472,7 +472,7 @@ int dump_certs_pkeys_bags(pTHX_ BIO *bio, CONST_STACK_OF(PKCS12_SAFEBAG) *bags, 
     if (hv_exists(bag_hv, "type", strlen("type"))) {
       svp = hv_fetch(bag_hv, "type", strlen("type"), 0);
       if (svp != NULL)
-          type = SvPVbyte_nolen(*svp);
+          type = SvPVbyte_nolen(aTHX_ *svp);
     }
     if (strcmp(type, "safe_contents_bag") == 0 ) {
       if((hv_store(hash, "safe_contents_bag", strlen("safe_contents_bag"), newRV_inc((SV *) bags_av), 0)) == NULL)
@@ -1034,14 +1034,14 @@ new_from_string(class, string)
        * filename like syscall fopen() which mainly may accept octet sequences
        * for UTF-8 in C char*. That's what we get from using SvPV(). Also,
        * using SvPV() is not a bug if ASCII input is only allowed. */
-      str_ptr = SvPV(string, str_len);
+      str_ptr = SvPV(aTHX_ string, str_len);
     } else {
       /* To avoid encoding mess, caller is not allowed to provide octets from
        * UTF-8 encoded strings. BIO_new_mem_buf() needs octet input only. */
       if (SvUTF8(string)) {
         croak("PKCS12_new_from: Source string must not be UTF-8 encoded (please use octets)");
       }
-      str_ptr = SvPV(string, str_len);
+      str_ptr = SvPV(aTHX_ string, str_len);
     }
   } else {
     croak("PKCS12_new_from: Invalid Perl type for string or file was passed (0x%x).", (unsigned int)SvFLAGS(string));
