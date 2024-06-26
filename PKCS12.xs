@@ -213,7 +213,7 @@ static const char *ssl_error(void) {
 }
 
 /* these are trimmed from their openssl/apps/pkcs12.c counterparts */
-int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass, int passlen, int options, char *pempass, HV * bag_hv) {
+int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass, int passlen, int options, char *pempass, const EVP_CIPHER *enc, HV * bag_hv) {
 
   EVP_PKEY *pkey;
   X509 *x509;
@@ -460,7 +460,7 @@ int dump_certs_pkeys_bags(pTHX_ BIO *bio, CONST_STACK_OF(PKCS12_SAFEBAG) *bags, 
   for (i = 0; i < sk_PKCS12_SAFEBAG_num(bags); i++) {
     if(hash)
       bag_hv = newHV();
-    if (!dump_certs_pkeys_bag (aTHX_ bio, sk_PKCS12_SAFEBAG_value (bags, i), pass, passlen, options, pempass, bag_hv)) {
+    if (!dump_certs_pkeys_bag (aTHX_ bio, sk_PKCS12_SAFEBAG_value (bags, i), pass, passlen, options, pempass, enc, bag_hv)) {
       return 0;
     }
     if(hash)
