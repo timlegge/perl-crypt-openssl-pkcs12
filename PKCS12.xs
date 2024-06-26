@@ -144,13 +144,13 @@ long bio_write_cb(struct bio_st *bm, int m, const char *ptr, int len, long x, lo
 
   if (m == BIO_CB_WRITE) {
     SV *sv = (SV *) BIO_get_callback_arg(bm);
-    sv_catpvn(aTHX_sv, ptr, len);
+    sv_catpvn(aTHX_ sv, ptr, len);
   }
 
   if (m == BIO_CB_PUTS) {
     SV *sv = (SV *) BIO_get_callback_arg(bm);
     len = strlen(ptr);
-    sv_catpvn(aTHX_sv, ptr, len);
+    sv_catpvn(aTHX_ sv, ptr, len);
   }
 
   return len;
@@ -158,7 +158,7 @@ long bio_write_cb(struct bio_st *bm, int m, const char *ptr, int len, long x, lo
 
 static BIO* sv_bio_create(void) {
 
-  SV *sv = newSVpvn(aTHX_"",0);
+  SV *sv = newSVpvn(aTHX_ "",0);
 
   /* create an in-memory BIO abstraction and callbacks */
   BIO *bio = BIO_new(BIO_s_mem());
@@ -244,7 +244,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
 
       if (options & INFO) {
         if (bag_hv) {
-          SV * value = newSVpvn(aTHX_"key_bag", strlen("key_bag"));
+          SV * value = newSVpvn(aTHX_ "key_bag", strlen("key_bag"));
           if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
             croak("unable to add certificate_bag to the bag_hv");
 
@@ -293,7 +293,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
         tp8alg = bag->value.shkeybag->algor;
 #endif
         if (bag_hv) {
-          SV * value = newSVpvn(aTHX_"shrouded_bag", strlen("shrouded_bag"));
+          SV * value = newSVpvn(aTHX_ "shrouded_bag", strlen("shrouded_bag"));
           HV * parameters_hv = newHV();;
           if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
             croak("unable to add type to the bag_hv");
@@ -311,7 +311,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
       }
       if (options & INFO) {
         if (bag_hv) {
-          SV * value = newSVpvn(aTHX_"shrouded_keybag", strlen("shrouded_keybag"));
+          SV * value = newSVpvn(aTHX_ "shrouded_keybag", strlen("shrouded_keybag"));
           if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
             croak("unable to add type to the bag_hv");
 
@@ -358,7 +358,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
       if ((x509 = PKCS12_SAFEBAG_get1_cert(bag)) == NULL) return 0;
       if (options & INFO) {
         if (bag_hv) {
-          SV * value = newSVpvn(aTHX_"certificate_bag", strlen("certificate_bag"));
+          SV * value = newSVpvn(aTHX_ "certificate_bag", strlen("certificate_bag"));
           print_attribs(aTHX_ bio, bag_attrs, "bag_attributes", bag_hv);
           if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
             croak("unable to add type to the bag_hv");
@@ -404,7 +404,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
           if(bag_hv) {
             Newx(attribute_value, 0, char);
             print_attribute(aTHX_ bio, PKCS12_SAFEBAG_get0_bag_obj(bag), &attribute_value);
-            if(hv_store(bag_hv, "attribute_here", strlen("attribute_here"), newSVpvn(aTHX_attribute_value, strlen(attribute_value)), 0) == NULL)
+            if(hv_store(bag_hv, "attribute_here", strlen("attribute_here"), newSVpvn(aTHX_ attribute_value, strlen(attribute_value)), 0) == NULL)
               croak("unable to add MAC to the bag_hv");
           } else {
             BIO_printf(bio, "\nBag Value: ");
@@ -418,7 +418,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
         //FIXME: Not sure how to test this
         if (options & INFO) {
           if(bag_hv) {
-            SV * value = newSVpvn(aTHX_"safe_contents_bag", strlen("safe_contents_bag"));
+            SV * value = newSVpvn(aTHX_ "safe_contents_bag", strlen("safe_contents_bag"));
             if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
               croak("unable to add type to the bag_hv");
 
@@ -435,7 +435,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
           } else {
             BIO_printf(bio, "Safe Contents bag\n");
             print_attribs(aTHX_ bio, bag_attrs, "Bag Attributes", NULL);
-            dump_certs_pkeys_bags(aTHX_bio, PKCS12_SAFEBAG_get0_safes(bag),
+            dump_certs_pkeys_bags(aTHX_ bio, PKCS12_SAFEBAG_get0_safes(bag),
                               pass, passlen, options, pempass, enc, NULL);
           }
         } else {
@@ -807,7 +807,7 @@ int print_attribs(pTHX_ BIO *out, CONST_STACK_OF(X509_ATTRIBUTE) *attrlst,
             /* Save the attribute name and value to the hash */
             attribute_id = OBJ_nid2ln(attr_nid);
             if (attribute_id) {
-              if((hv_store(bag_hv, attribute_id, strlen(attribute_id), newSVpvn(aTHX_attribute_value, strlen(attribute_value)), 0)) == NULL)
+              if((hv_store(bag_hv, attribute_id, strlen(attribute_id), newSVpvn(aTHX_ attribute_value, strlen(attribute_value)), 0)) == NULL)
                 croak("unable to add MAC to the hash");
             }
           }
@@ -839,10 +839,10 @@ static int alg_print(pTHX_ BIO *bio, CONST_X509_ALGOR *alg, HV * parameters_hash
   X509_ALGOR_get0(&aoid, &aparamtype, &aparam, alg);
   pbenid = OBJ_obj2nid(aoid);
   if (parameters_hash) {
-    SV * nid_long_name = newSVpvn(aTHX_OBJ_nid2ln(pbenid), strlen(OBJ_nid2ln(pbenid)));
+    SV * nid_long_name = newSVpvn(aTHX_ OBJ_nid2ln(pbenid), strlen(OBJ_nid2ln(pbenid)));
     if((hv_store(parameters_hash, "nid_long_name", strlen("nid_long_name"), nid_long_name, 0)) == NULL)
       croak("unable to add MAC to the parameters_hash");
-    SV * nid_short_name = newSVpvn(aTHX_OBJ_nid2sn(pbenid), strlen(OBJ_nid2sn(pbenid)));
+    SV * nid_short_name = newSVpvn(aTHX_ OBJ_nid2sn(pbenid), strlen(OBJ_nid2sn(pbenid)));
     if((hv_store(parameters_hash, "nid_short_name", strlen("nid_short_name"), nid_short_name, 0)) == NULL)
       croak("unable to add MAC to the parameters_hash");
   } else {
@@ -867,10 +867,10 @@ static int alg_print(pTHX_ BIO *bio, CONST_X509_ALGOR *alg, HV * parameters_hash
     X509_ALGOR_get0(&aoid, NULL, NULL, pbe2->encryption);
     encnid = OBJ_obj2nid(aoid);
     if (parameters_hash) {
-      SV * nid_long_name = newSVpvn(aTHX_OBJ_nid2ln(pbenid), strlen(OBJ_nid2ln(pbenid)));
+      SV * nid_long_name = newSVpvn(aTHX_ OBJ_nid2ln(pbenid), strlen(OBJ_nid2ln(pbenid)));
       if((hv_store(parameters_hash, "nid_long_name", strlen("nid_long_name"), nid_long_name, 0)) == NULL)
         croak("unable to add MAC to the parameters_hash");
-      SV * nid_short_name = newSVpvn(aTHX_OBJ_nid2sn(pbenid), strlen(OBJ_nid2sn(pbenid)));
+      SV * nid_short_name = newSVpvn(aTHX_ OBJ_nid2sn(pbenid), strlen(OBJ_nid2sn(pbenid)));
       if((hv_store(parameters_hash, "nid_short_name", strlen("nid_short_name"), nid_short_name, 0)) == NULL)
         croak("unable to add MAC to the parameters_hash");
     } else
