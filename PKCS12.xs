@@ -434,7 +434,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
           } else {
             BIO_printf(bio, "Safe Contents bag\n");
             print_attribs(aTHX_ bio, bag_attrs, "Bag Attributes", NULL);
-            return dump_certs_pkeys_bags(aTHX bio, PKCS12_SAFEBAG_get0_safes(bag),
+            dump_certs_pkeys_bags(aTHX bio, PKCS12_SAFEBAG_get0_safes(bag),
                               pass, passlen, options, pempass, enc, NULL);
           }
         } else {
