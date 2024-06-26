@@ -102,61 +102,68 @@ if ($major gt '1.0') {
 }
 
 like($info_hash->{mac}{iteration}, qr/2048/, "MAC Iteration is 2048");
-my $bags = $info_hash->{pkcs7_data}->{bags};
+my $pkcs7_cnt = scalar @{$info_hash->{pkcs7_data}};
 
-is(scalar @$bags, 1, "One bag in pkcs7_data");
 ok($info_hash->{pkcs7_data}, "pkcs7_data key exists");
+for (my $i = 0; $i < $pkcs7_cnt; $i++) {
+  my $bags = $info_hash->{pkcs7_data}[$i]->{bags};
 
-my $bag_attributes = @$bags[0]->{bag_attributes};
+  is(scalar @$bags, 1, "One bag in pkcs7_data");
 
-is(keys %$bag_attributes, 2, "Two bag attributes in pkcs7_data bag");
+  my $bag_attributes = @$bags[0]->{bag_attributes};
 
-foreach my $attribute (keys %$bag_attributes) {
+  is(keys %$bag_attributes, 2, "Two bag attributes in pkcs7_data bag");
+
+  foreach my $attribute (keys %$bag_attributes) {
         like($bag_attributes->{localKeyID}, qr/CD 93 42 14 8F 01 1B D4 CB C7 11 42 E7 32 15 DE 17 DE 39 07/, "localKeyID matches") if $attribute eq "localKeyID";
         like($bag_attributes->{friendlyName}, qr/Test PKCS12/, "friendlyName matches") if $attribute eq "friendlyName";
+  }
+
+  like(@$bags[0]->{key}, qr/PRIVATE KEY/, "pkcs7_data found private key");
+  like(@$bags[0]->{key}, qr/LtNKMHYyvEUK5Q/, "pkcs7_data key matches");
+  like(@$bags[0]->{parameters}->{iteration}, qr/2048/, "pkcs7_data parameters iteration matches");
+  like(@$bags[0]->{parameters}->{nid_long_name}, qr/pbeWithSHA1And3-KeyTripleDES-CBC/, "pkcs7_data parameters nid_long_name matches");
+  like(@$bags[0]->{parameters}->{nid_short_name}, qr/PBE-SHA1-3DES/, "pkcs7_bag parameters nid_short_name matches");
+  like(@$bags[0]->{type}, qr/shrouded_keybag/, "pkcs7_data bag type matches");
 }
 
-like(@$bags[0]->{key}, qr/PRIVATE KEY/, "pkcs7_data found private key");
-like(@$bags[0]->{key}, qr/LtNKMHYyvEUK5Q/, "pkcs7_data key matches");
-like(@$bags[0]->{parameters}->{iteration}, qr/2048/, "pkcs7_data parameters iteration matches");
-like(@$bags[0]->{parameters}->{nid_long_name}, qr/pbeWithSHA1And3-KeyTripleDES-CBC/, "pkcs7_data parameters nid_long_name matches");
-like(@$bags[0]->{parameters}->{nid_short_name}, qr/PBE-SHA1-3DES/, "pkcs7_bag parameters nid_short_name matches");
-like(@$bags[0]->{type}, qr/shrouded_keybag/, "pkcs7_data bag type matches");
+my $pkcs7_enc_cnt = scalar @{$info_hash->{pkcs7_encrypted_data}};
 
-$bags = $info_hash->{pkcs7_encrypted_data}->{bags};
-
-is(scalar @$bags, 2, "Two bags in pkcs7_encrypted_data");
 ok($info_hash->{pkcs7_encrypted_data}, "pkcs7_encrypted_data key exists");
+for (my $i = 0; $i < $pkcs7_enc_cnt; $i++) {
+  my $bags = $info_hash->{pkcs7_encrypted_data}[$i]->{bags};
 
-$bag_attributes = @$bags[0]->{bag_attributes};
+  is(scalar @$bags, 2, "Two bags in pkcs7_encrypted_data");
 
-is(keys %$bag_attributes, 2, "Two bag attributes in bag");
+  my $bag_attributes = @$bags[0]->{bag_attributes};
 
-foreach my $attribute (keys %$bag_attributes) {
+  is(keys %$bag_attributes, 2, "Two bag attributes in bag");
+
+  foreach my $attribute (keys %$bag_attributes) {
         like($bag_attributes->{localKeyID}, qr/CD 93 42 14 8F 01 1B D4 CB C7 11 42 E7 32 15 DE 17 DE 39 07/, "localKeyID matches") if $attribute eq "localKeyID";
         like($bag_attributes->{friendlyName}, qr/Test PKCS12/, "friendlyName matches") if $attribute eq "friendlyName";
+ }
+
+  my $parameters = $info_hash->{pkcs7_encrypted_data}[$i]->{parameters};
+  like($parameters->{iteration}, qr/2048/, "pkcs7_data parameters iteration matches");
+  like($parameters->{nid_long_name}, qr/pbeWithSHA1And40BitRC2-CBC/, "pkcs7_data parameters nid_long_name matches");
+  like($parameters->{nid_short_name}, qr/PBE-SHA1-RC2-40/, "pkcs7_bag parameters nid_short_name matches");
+
+  like(@$bags[0]->{cert}, qr/CERTIFICATE/, "pkcs7_encrypted_data found certificate");
+  like(@$bags[0]->{cert}, qr/ZaTUrp4Ewu9\/9D2h+/, "pkcs7_encrypted_data key matches");
+  like(@$bags[0]->{type}, qr/certificate_bag/, "pkcs7_encrypted_data bag type matches");
+
+  like(@$bags[0]->{issuer}, qr/C = US, ST = California, L = Daly City, O = ElectricRain, CN = test.electricrain.com/, "pkcs7_encrypted_data issuer matches");
+  like(@$bags[0]->{subject}, qr/C = US, ST = California, O = ElectricRain, CN = test.electricrain.com/, "pkcs7_encrypted_data subject matches");
+
+  like(@$bags[1]->{cert}, qr/CERTIFICATE/, "pkcs7_encrypted_data found certificate");
+  like(@$bags[1]->{cert}, qr/Bs71gn9srGliTox1NZNe2Br/, "pkcs7_encrypted_data key matches");
+  like(@$bags[1]->{type}, qr/certificate_bag/, "pkcs7_encrypted_data bag type matches");
+
+  like(@$bags[1]->{issuer}, qr/C = US, ST = California, L = Daly City, O = ElectricRain, CN = test.electricrain.com/, "pkcs7_encrypted_data issuer matches");
+  like(@$bags[1]->{subject}, qr/C = US, ST = California, L = Daly City, O = ElectricRain, CN = test.electricrain.com/, "pkcs7_encrypted_data subject matches");
+
+  $bag_attributes = @$bags[1]->{bag_attributes};
+  is(keys %$bag_attributes, 0, "Zero bag attributes in bag");
 }
-
-my $parameters = $info_hash->{pkcs7_encrypted_data}->{parameters};
-like($parameters->{iteration}, qr/2048/, "pkcs7_data parameters iteration matches");
-like($parameters->{nid_long_name}, qr/pbeWithSHA1And40BitRC2-CBC/, "pkcs7_data parameters nid_long_name matches");
-like($parameters->{nid_short_name}, qr/PBE-SHA1-RC2-40/, "pkcs7_bag parameters nid_short_name matches");
-
-like(@$bags[0]->{cert}, qr/CERTIFICATE/, "pkcs7_encrypted_data found certificate");
-like(@$bags[0]->{cert}, qr/ZaTUrp4Ewu9\/9D2h+/, "pkcs7_encrypted_data key matches");
-like(@$bags[0]->{type}, qr/certificate_bag/, "pkcs7_encrypted_data bag type matches");
-
-like(@$bags[0]->{issuer}, qr/C = US, ST = California, L = Daly City, O = ElectricRain, CN = test.electricrain.com/, "pkcs7_encrypted_data issuer matches");
-like(@$bags[0]->{subject}, qr/C = US, ST = California, O = ElectricRain, CN = test.electricrain.com/, "pkcs7_encrypted_data subject matches");
-
-like(@$bags[1]->{cert}, qr/CERTIFICATE/, "pkcs7_encrypted_data found certificate");
-like(@$bags[1]->{cert}, qr/Bs71gn9srGliTox1NZNe2Br/, "pkcs7_encrypted_data key matches");
-like(@$bags[1]->{type}, qr/certificate_bag/, "pkcs7_encrypted_data bag type matches");
-
-like(@$bags[1]->{issuer}, qr/C = US, ST = California, L = Daly City, O = ElectricRain, CN = test.electricrain.com/, "pkcs7_encrypted_data issuer matches");
-like(@$bags[1]->{subject}, qr/C = US, ST = California, L = Daly City, O = ElectricRain, CN = test.electricrain.com/, "pkcs7_encrypted_data subject matches");
-
-$bag_attributes = @$bags[1]->{bag_attributes};
-is(keys %$bag_attributes, 0, "Zero bag attributes in bag");
-
 done_testing;

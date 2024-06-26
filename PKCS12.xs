@@ -254,7 +254,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
 
           if((hv_store(bag_hv, "key", strlen("key"), key_sv, 0)) == NULL)
             croak("unable to add certificate_bag to the bag_hv");
-          print_attribs(aTHX_ bio, key_attrs, "Key Attributes", bag_hv);
+          print_attribs(aTHX_ bio, key_attrs, "key_attributes", bag_hv);
         } else {
           BIO_printf(bio, "Key bag\n");
           print_attribs(aTHX_ bio, key_attrs, "Key Attributes", NULL);
@@ -299,7 +299,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
 #if OPENSSL_VERSION_NUMBER > 0x10000000L
           alg_print(aTHX_ bio, tp8alg, parameters_hv);
 #endif
-          print_attribs(aTHX_ bio, bag_attrs, "Bag Attributes", bag_hv);
+          print_attribs(aTHX_ bio, bag_attrs, "bag_attributes", bag_hv);
           if((hv_store(bag_hv, "parameters", strlen("parameters"), newRV_inc((SV *) parameters_hv), 0)) == NULL)
             croak("unable to add bag_attributes to the bag_hv");
         } else {
@@ -314,7 +314,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
           if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
             croak("unable to add type to the bag_hv");
 
-          print_attribs(aTHX_ bio, key_attrs, "Key Attributes", bag_hv);
+          print_attribs(aTHX_ bio, key_attrs, "key_attributes", bag_hv);
 
           /* Assign the output to a temporary BIO and free after it is saved to key_sv */
           BIO *keybio = sv_bio_create();
@@ -358,7 +358,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
       if (options & INFO) {
         if (bag_hv) {
           SV * value = newSVpvn("certificate_bag", strlen("certificate_bag"));
-          print_attribs(aTHX_ bio, bag_attrs, "Bag Attributes", bag_hv);
+          print_attribs(aTHX_ bio, bag_attrs, "bag_attributes", bag_hv);
           if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
             croak("unable to add type to the bag_hv");
           if((hv_store(bag_hv, "subject", strlen("subject"), get_cert_subject_name(aTHX_ x509), 0)) == NULL)
@@ -391,7 +391,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
         if (options & INFO) {
           BIO_printf(bio, "Secret bag\n");
         if (bag_hv){
-          print_attribs(aTHX_ bio, bag_attrs, "Bag Attributes", bag_hv);
+          print_attribs(aTHX_ bio, bag_attrs, "bag_attributes", bag_hv);
         }
         else
           print_attribs(aTHX_ bio, bag_attrs, "Bag Attributes", NULL);
@@ -416,14 +416,30 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
     case NID_safeContentsBag:
         //FIXME: Not sure how to test this
         if (options & INFO) {
-          BIO_printf(bio, "Safe Contents bag\n");
           if(bag_hv) {
-            print_attribs(aTHX_ bio, bag_attrs, "Bag Attributes", bag_hv);
+            SV * value = newSVpvn("safe_contents_bag", strlen("safe_contents_bag"));
+            if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
+              croak("unable to add type to the bag_hv");
+
+            print_attribs(aTHX_ bio, bag_attrs, "bag_attributes", bag_hv);
+
+            //BIO *keybio = sv_bio_create();
+            //PEM_write_bio_X509 (keybio, x509);
+            //SV * key_sv = sv_bio_final(keybio);
+            //STRLEN len;
+            //if((hv_store(bag_hv, "cert", strlen("cert"), key_sv, 0)) == NULL)
+            //  croak("unable to add certificate_bag to the bag_hv");
+            dump_certs_pkeys_bags(aTHX_ bio, PKCS12_SAFEBAG_get0_safes(bag),
+                                    pass, passlen, options, pempass, enc, bag_hv);
           } else {
+            BIO_printf(bio, "Safe Contents bag\n");
             print_attribs(aTHX_ bio, bag_attrs, "Bag Attributes", NULL);
+            return dump_certs_pkeys_bags(aTHX bio, PKCS12_SAFEBAG_get0_safes(bag),
+                              pass, passlen, options, pempass, enc, NULL);
           }
-          dump_certs_pkeys_bags(aTHX_ bio, PKCS12_SAFEBAG_get0_safes(bag),
-                                      pass, passlen, options, pempass, enc, bag_hv);
+        } else {
+            PEM_write_bio_X509 (bio, x509);
+
         }
         break;
   }
@@ -450,8 +466,20 @@ int dump_certs_pkeys_bags(pTHX_ BIO *bio, CONST_STACK_OF(PKCS12_SAFEBAG) *bags, 
       av_push(bags_av, newRV_inc((SV *) bag_hv));
   }
   if (hash) {
-    if((hv_store(hash, "bags", strlen("bags"), newRV_inc((SV *) bags_av), 0)) == NULL)
-      croak("unable to add bags to the hash");
+    SV **svp;
+    char *type;
+    if (hv_exists(bag_hv, "type", strlen("type"))) {
+      svp = hv_fetch(bag_hv, "type", strlen("type"), 0);
+      if (svp != NULL)
+          type = SvPVbyte_nolen(*svp);
+    }
+    if (strcmp(type, "safe_contents_bag") == 0 ) {
+      if((hv_store(hash, "safe_contents_bag", strlen("safe_contents_bag"), newRV_inc((SV *) bags_av), 0)) == NULL)
+        croak("unable to add bags to the hash");
+    } else {
+      if((hv_store(hash, "bags", strlen("bags"), newRV_inc((SV *) bags_av), 0)) == NULL)
+        croak("unable to add bags to the hash");
+    }
   }
   return 1;
 }
@@ -465,6 +493,8 @@ int dump_certs_keys_p12(pTHX_ BIO *bio, PKCS12 *p12, char *pass, int passlen, in
   PKCS7 *p7;
   HV * bag_hv = NULL;
   HV * parameters_hv = NULL;
+  AV * pkcs7_bags_av = newAV();
+  AV * pkcs7_enc_bags_av = newAV();
 
   if ((asafes = PKCS12_unpack_authsafes(p12)) == NULL) {
     croak("Unable to PKCS12_unpack_authsafes");
@@ -487,8 +517,7 @@ int dump_certs_keys_p12(pTHX_ BIO *bio, PKCS12 *p12, char *pass, int passlen, in
       if (options & INFO) {
         if (orig_hash) {
           bag_hv = newHV();
-          if((hv_store(orig_hash, "pkcs7_data", strlen("pkcs7_data"), newRV_inc((SV *) bag_hv), 0)) == NULL)
-            croak("unable to add pkcs7_data to the orig_hash");
+          av_push(pkcs7_bags_av, newRV_inc((SV *) bag_hv));
         }
         else
           BIO_printf(bio, "PKCS7 Data\n");
@@ -506,6 +535,7 @@ int dump_certs_keys_p12(pTHX_ BIO *bio, PKCS12 *p12, char *pass, int passlen, in
             croak("unable to add parameters to the hash");
           if((hv_store(orig_hash, "pkcs7_encrypted_data", strlen("pkcs7_encrypted_data"), newRV_inc((SV *) bag_hv), 0)) == NULL)
             croak("unable to add pkcs7_encrypted_data to the orig_hash");
+          av_push(pkcs7_enc_bags_av, newRV_inc((SV *) bag_hv));
         } else {
           BIO_printf(bio, "PKCS7 Encrypted data: ");
           if (p7->d.encrypted == NULL) {
@@ -524,11 +554,16 @@ int dump_certs_keys_p12(pTHX_ BIO *bio, PKCS12 *p12, char *pass, int passlen, in
     if (bags == NULL) return 0;
 
     if (!dump_certs_pkeys_bags(aTHX_ bio, bags, pass, passlen, options, pempass, enc, bag_hv)) {
-
       sk_PKCS12_SAFEBAG_pop_free(bags, PKCS12_SAFEBAG_free);
       return 0;
     }
 
+  if (orig_hash) {
+    if((hv_store(orig_hash, "pkcs7_data", strlen("pkcs7_data"), newRV_inc((SV *) pkcs7_bags_av), 0)) == NULL)
+      croak("unable to add bags to the hash");
+    if((hv_store(orig_hash, "pkcs7_encrypted_data", strlen("pkcs7_encrypted_data"), newRV_inc((SV *) pkcs7_enc_bags_av), 0)) == NULL)
+      croak("unable to add bags to the hash");
+  }
     sk_PKCS12_SAFEBAG_pop_free(bags, PKCS12_SAFEBAG_free);
   }
 
@@ -787,7 +822,7 @@ int print_attribs(pTHX_ BIO *out, CONST_STACK_OF(X509_ATTRIBUTE) *attrlst,
     }
   }
   if (hash) {
-    if((hv_store(hash, "bag_attributes", strlen("bag_attributes"), newRV_inc((SV *) bag_hv), 0)) == NULL)
+    if((hv_store(hash, name, strlen(name), newRV_inc((SV *) bag_hv), 0)) == NULL)
       croak("unable to add bags to the hash");
   }
   return 1;
