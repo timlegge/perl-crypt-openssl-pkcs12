@@ -135,6 +135,7 @@ STACK_OF(X509)* _load_cert_chain(char* keyString, STACK_OF(X509_INFO)*(*p_loader
   return stack;
 }
 
+#ifdef TIM
 #if OPENSSL_VERSION_NUMBER >= 0x30000000L
 long bio_write_cb(pTHX_ struct bio_st *bm, int m, const char *ptr, size_t len, int l, long x, int y, size_t *processed) {
 #else
@@ -191,6 +192,7 @@ static SV* sv_bio_final(BIO *bio) {
 
   return sv;
 }
+#endif
 
 static void sv_bio_error(BIO *bio) {
 
@@ -200,16 +202,37 @@ static void sv_bio_error(BIO *bio) {
   BIO_free_all (bio);
 }
 
-static const char *ssl_error(void) {
+#define PACKAGE_CROAK(p_message) croak("%s", (p_message))
+#define CHECK_NEW(p_var, p_size, p_type) \
+   if (New(0, p_var, p_size, p_type) == NULL) \
+     { PACKAGE_CROAK("unable to alloc buffer"); }
+
+SV* extractBioString(pTHX_ BIO* p_stringBio)
+{
+     SV* sv;
+     BUF_MEM* bptr;
+
+     CHECK_OPEN_SSL(BIO_flush(p_stringBio) == 1);
+     BIO_get_mem_ptr(p_stringBio, &bptr);
+     sv = newSVpv(bptr->data, bptr->length);
+
+     CHECK_OPEN_SSL(BIO_set_close(p_stringBio, BIO_CLOSE) == 1);
+     BIO_free(p_stringBio);
+     return sv;
+}
+
+static const char *ssl_error(pTHX) {
   BIO *bio;
   SV *sv;
   STRLEN l;
 
-  bio = sv_bio_create();
+  //bio = sv_bio_create(aTHX);
+  CHECK_OPEN_SSL(bio = BIO_new(BIO_s_mem()));
   ERR_print_errors(bio);
-  sv = sv_bio_final(bio);
+  //sv = sv_bio_final(aTHX_ bio);
+  sv = extractBioString(aTHX_ bio);
   ERR_clear_error();
-  return SvPV(aTHX_ sv, l);
+  return SvPV(sv, l);
 }
 
 /* these are trimmed from their openssl/apps/pkcs12.c counterparts */
@@ -244,14 +267,17 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
 
       if (options & INFO) {
         if (bag_hv) {
-          SV * value = newSVpvn(aTHX_ "key_bag", strlen("key_bag"));
+          SV * value = newSVpvn("key_bag", strlen("key_bag"));
           if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
             croak("unable to add certificate_bag to the bag_hv");
 
           /* Assign the output to a temporary BIO and free after it is saved to key_sv */
-          BIO *keybio = sv_bio_create();
+          //BIO *keybio = sv_bio_create(aTHX);
+          BIO *keybio;
+          CHECK_OPEN_SSL(keybio = BIO_new(BIO_s_mem()));
           PEM_write_bio_PrivateKey (keybio, pkey, enc, NULL, 0, NULL, pempass);
-          SV * key_sv = sv_bio_final(keybio);
+          //SV * key_sv = sv_bio_final(aTHX_ keybio);
+          SV * key_sv = extractBioString(aTHX_ keybio);
 
           if((hv_store(bag_hv, "key", strlen("key"), key_sv, 0)) == NULL)
             croak("unable to add certificate_bag to the bag_hv");
@@ -293,7 +319,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
         tp8alg = bag->value.shkeybag->algor;
 #endif
         if (bag_hv) {
-          SV * value = newSVpvn(aTHX_ "shrouded_bag", strlen("shrouded_bag"));
+          SV * value = newSVpvn("shrouded_bag", strlen("shrouded_bag"));
           HV * parameters_hv = newHV();;
           if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
             croak("unable to add type to the bag_hv");
@@ -311,16 +337,19 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
       }
       if (options & INFO) {
         if (bag_hv) {
-          SV * value = newSVpvn(aTHX_ "shrouded_keybag", strlen("shrouded_keybag"));
+          SV * value = newSVpvn("shrouded_keybag", strlen("shrouded_keybag"));
           if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
             croak("unable to add type to the bag_hv");
 
           print_attribs(aTHX_ bio, key_attrs, "key_attributes", bag_hv);
 
           /* Assign the output to a temporary BIO and free after it is saved to key_sv */
-          BIO *keybio = sv_bio_create();
+          //BIO *keybio = sv_bio_create(aTHX);
+          BIO *keybio;
+          CHECK_OPEN_SSL(keybio = BIO_new(BIO_s_mem()));
           PEM_write_bio_PrivateKey (keybio, pkey, enc, NULL, 0, NULL, pempass);
-          SV * key_sv = sv_bio_final(keybio);
+          //SV * key_sv = sv_bio_final(aTHX_ keybio);
+          SV * key_sv = extractBioString(aTHX_ keybio);
 
           if((hv_store(bag_hv, "key", strlen("key"), key_sv, 0)) == NULL)
             croak("unable to add certificate_bag to the bag_hv");
@@ -358,7 +387,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
       if ((x509 = PKCS12_SAFEBAG_get1_cert(bag)) == NULL) return 0;
       if (options & INFO) {
         if (bag_hv) {
-          SV * value = newSVpvn(aTHX_ "certificate_bag", strlen("certificate_bag"));
+          SV * value = newSVpvn("certificate_bag", strlen("certificate_bag"));
           print_attribs(aTHX_ bio, bag_attrs, "bag_attributes", bag_hv);
           if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
             croak("unable to add type to the bag_hv");
@@ -366,9 +395,12 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
             croak("unable to add subject to the bag_hv");
           if((hv_store(bag_hv, "issuer", strlen("issuer"), get_cert_issuer_name(aTHX_ x509), 0)) == NULL)
             croak("unable to add issuer to the bag_hv");
-          BIO *keybio = sv_bio_create();
+          //BIO *keybio = sv_bio_create(aTHX);
+          BIO *keybio;
+          CHECK_OPEN_SSL(keybio = BIO_new(BIO_s_mem()));
           PEM_write_bio_X509 (keybio, x509);
-          SV * key_sv = sv_bio_final(keybio);
+          //SV * key_sv = sv_bio_final(aTHX_ keybio);
+          SV * key_sv = extractBioString(aTHX_ keybio);
           if((hv_store(bag_hv, "cert", strlen("cert"), key_sv, 0)) == NULL)
             croak("unable to add certificate_bag to the bag_hv");
         } else
@@ -404,7 +436,7 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
           if(bag_hv) {
             Newx(attribute_value, 0, char);
             print_attribute(aTHX_ bio, PKCS12_SAFEBAG_get0_bag_obj(bag), &attribute_value);
-            if(hv_store(bag_hv, "attribute_here", strlen("attribute_here"), newSVpvn(aTHX_ attribute_value, strlen(attribute_value)), 0) == NULL)
+            if(hv_store(bag_hv, "attribute_here", strlen("attribute_here"), newSVpvn(attribute_value, strlen(attribute_value)), 0) == NULL)
               croak("unable to add MAC to the bag_hv");
           } else {
             BIO_printf(bio, "\nBag Value: ");
@@ -418,15 +450,15 @@ int dump_certs_pkeys_bag (pTHX_ BIO *bio, PKCS12_SAFEBAG *bag, const char *pass,
         //FIXME: Not sure how to test this
         if (options & INFO) {
           if(bag_hv) {
-            SV * value = newSVpvn(aTHX_ "safe_contents_bag", strlen("safe_contents_bag"));
+            SV * value = newSVpvn("safe_contents_bag", strlen("safe_contents_bag"));
             if((hv_store(bag_hv, "type", strlen("type"), value, 0)) == NULL)
               croak("unable to add type to the bag_hv");
 
             print_attribs(aTHX_ bio, bag_attrs, "bag_attributes", bag_hv);
 
-            //BIO *keybio = sv_bio_create();
+            //BIO *keybio = sv_bio_create(aTHX);
             //PEM_write_bio_X509 (keybio, x509);
-            //SV * key_sv = sv_bio_final(keybio);
+            //SV * key_sv = sv_bio_final(aTHX_ keybio);
             //STRLEN len;
             //if((hv_store(bag_hv, "cert", strlen("cert"), key_sv, 0)) == NULL)
             //  croak("unable to add certificate_bag to the bag_hv");
@@ -472,7 +504,7 @@ int dump_certs_pkeys_bags(pTHX_ BIO *bio, CONST_STACK_OF(PKCS12_SAFEBAG) *bags, 
     if (hv_exists(bag_hv, "type", strlen("type"))) {
       svp = hv_fetch(bag_hv, "type", strlen("type"), 0);
       if (svp != NULL)
-          type = SvPVbyte_nolen(aTHX_ *svp);
+          type = SvPVbyte_nolen(*svp);
     }
     if (strcmp(type, "safe_contents_bag") == 0 ) {
       if((hv_store(hash, "safe_contents_bag", strlen("safe_contents_bag"), newRV_inc((SV *) bags_av), 0)) == NULL)
@@ -641,18 +673,26 @@ void dump_cert_text(BIO *out, X509 *x)
 
 SV * get_cert_subject_name(pTHX_ X509 *x)
 {
-  BIO *bio = sv_bio_create();
+  //BIO *bio = sv_bio_create(aTHX);
+  BIO *bio;
+  CHECK_OPEN_SSL(bio = BIO_new(BIO_s_mem()));
 
   print_name(bio, "", X509_get_subject_name(x));
-  return sv_bio_final(bio);
+  //return sv_bio_final(aTHX_ bio);
+  SV *sv = extractBioString(aTHX_ bio);
+  return sv;
 }
 
 SV * get_cert_issuer_name(pTHX_ X509 *x)
 {
-  BIO *bio = sv_bio_create();
+  //BIO *bio = sv_bio_create(aTHX);
+  BIO *bio;
+  CHECK_OPEN_SSL(bio = BIO_new(BIO_s_mem()));
 
   print_name(bio, "", X509_get_issuer_name(x));
-  return sv_bio_final(bio);
+  //return sv_bio_final(aTHX_ bio);
+  SV *sv = extractBioString(aTHX_ bio);
+  return sv;
 }
 
 void get_hex(char *out, unsigned char *buf, int len)
@@ -807,7 +847,7 @@ int print_attribs(pTHX_ BIO *out, CONST_STACK_OF(X509_ATTRIBUTE) *attrlst,
             /* Save the attribute name and value to the hash */
             attribute_id = OBJ_nid2ln(attr_nid);
             if (attribute_id) {
-              if((hv_store(bag_hv, attribute_id, strlen(attribute_id), newSVpvn(aTHX_ attribute_value, strlen(attribute_value)), 0)) == NULL)
+              if((hv_store(bag_hv, attribute_id, strlen(attribute_id), newSVpvn(attribute_value, strlen(attribute_value)), 0)) == NULL)
                 croak("unable to add MAC to the hash");
             }
           }
@@ -839,10 +879,10 @@ static int alg_print(pTHX_ BIO *bio, CONST_X509_ALGOR *alg, HV * parameters_hash
   X509_ALGOR_get0(&aoid, &aparamtype, &aparam, alg);
   pbenid = OBJ_obj2nid(aoid);
   if (parameters_hash) {
-    SV * nid_long_name = newSVpvn(aTHX_ OBJ_nid2ln(pbenid), strlen(OBJ_nid2ln(pbenid)));
+    SV * nid_long_name = newSVpvn(OBJ_nid2ln(pbenid), strlen(OBJ_nid2ln(pbenid)));
     if((hv_store(parameters_hash, "nid_long_name", strlen("nid_long_name"), nid_long_name, 0)) == NULL)
       croak("unable to add MAC to the parameters_hash");
-    SV * nid_short_name = newSVpvn(aTHX_ OBJ_nid2sn(pbenid), strlen(OBJ_nid2sn(pbenid)));
+    SV * nid_short_name = newSVpvn(OBJ_nid2sn(pbenid), strlen(OBJ_nid2sn(pbenid)));
     if((hv_store(parameters_hash, "nid_short_name", strlen("nid_short_name"), nid_short_name, 0)) == NULL)
       croak("unable to add MAC to the parameters_hash");
   } else {
@@ -867,10 +907,10 @@ static int alg_print(pTHX_ BIO *bio, CONST_X509_ALGOR *alg, HV * parameters_hash
     X509_ALGOR_get0(&aoid, NULL, NULL, pbe2->encryption);
     encnid = OBJ_obj2nid(aoid);
     if (parameters_hash) {
-      SV * nid_long_name = newSVpvn(aTHX_ OBJ_nid2ln(pbenid), strlen(OBJ_nid2ln(pbenid)));
+      SV * nid_long_name = newSVpvn(OBJ_nid2ln(pbenid), strlen(OBJ_nid2ln(pbenid)));
       if((hv_store(parameters_hash, "nid_long_name", strlen("nid_long_name"), nid_long_name, 0)) == NULL)
         croak("unable to add MAC to the parameters_hash");
-      SV * nid_short_name = newSVpvn(aTHX_ OBJ_nid2sn(pbenid), strlen(OBJ_nid2sn(pbenid)));
+      SV * nid_short_name = newSVpvn(OBJ_nid2sn(pbenid), strlen(OBJ_nid2sn(pbenid)));
       if((hv_store(parameters_hash, "nid_short_name", strlen("nid_short_name"), nid_short_name, 0)) == NULL)
         croak("unable to add MAC to the parameters_hash");
     } else
@@ -1034,14 +1074,14 @@ new_from_string(class, string)
        * filename like syscall fopen() which mainly may accept octet sequences
        * for UTF-8 in C char*. That's what we get from using SvPV(). Also,
        * using SvPV() is not a bug if ASCII input is only allowed. */
-      str_ptr = SvPV(aTHX_ string, str_len);
+      str_ptr = SvPV(string, str_len);
     } else {
       /* To avoid encoding mess, caller is not allowed to provide octets from
        * UTF-8 encoded strings. BIO_new_mem_buf() needs octet input only. */
       if (SvUTF8(string)) {
         croak("PKCS12_new_from: Source string must not be UTF-8 encoded (please use octets)");
       }
-      str_ptr = SvPV(aTHX_ string, str_len);
+      str_ptr = SvPV(string, str_len);
     }
   } else {
     croak("PKCS12_new_from: Invalid Perl type for string or file was passed (0x%x).", (unsigned int)SvFLAGS(string));
@@ -1060,7 +1100,7 @@ new_from_string(class, string)
   /* this can come in any number of ways */
   if ((RETVAL = d2i_PKCS12_bio(bio, 0)) == NULL) {
     BIO_free_all(bio);
-    croak("%" SVf ": Couldn't create PKCS12 from d2i_PKCS12_BIO(): %s", SVfARG(class), ssl_error());
+    croak("%" SVf ": Couldn't create PKCS12 from d2i_PKCS12_BIO(): %s", SVfARG(class), ssl_error(aTHX));
   }
 
   BIO_free_all(bio);
@@ -1099,14 +1139,16 @@ as_string(pkcs12)
 
   CODE:
 
-  bio = sv_bio_create();
+  //bio = sv_bio_create(aTHX);
+  CHECK_OPEN_SSL(bio = BIO_new(BIO_s_mem()));
 
   if (!(i2d_PKCS12_bio(bio, pkcs12))) {
-    sv_bio_error(bio);
-    croak("i2d_PKCS12_bio: %s", ssl_error());
+    sv_bio_error(aTHX_ bio);
+    croak("i2d_PKCS12_bio: %s", ssl_error(aTHX));
   }
 
-  RETVAL = sv_bio_final(bio);
+  RETVAL = extractBioString(aTHX_ bio);
+  //RETVAL = sv_bio_final(aTHX_ bio);
 
   OUTPUT:
   RETVAL
@@ -1119,7 +1161,7 @@ mac_ok(pkcs12, pwd = "")
   CODE:
 
   if (!(PKCS12_verify_mac(pkcs12, pwd, strlen(pwd)))) {
-    croak("PKCS12_verify_mac: \n%s", ssl_error());
+    croak("PKCS12_verify_mac: \n%s", ssl_error(aTHX));
   }
 
   RETVAL = (PKCS12_verify_mac(pkcs12, pwd, strlen(pwd))) ? &PL_sv_yes : &PL_sv_no;
@@ -1136,7 +1178,7 @@ changepass(pkcs12, oldpwd = "", newpwd = "")
   CODE:
 
   if (!(PKCS12_newpass(pkcs12, oldpwd, newpwd))) {
-    warn("PKCS12_newpass: %s %s\n%s", oldpwd, newpwd, ssl_error());
+    warn("PKCS12_newpass: %s %s\n%s", oldpwd, newpwd, ssl_error(aTHX));
     RETVAL = &PL_sv_no;
   } else {
     RETVAL = &PL_sv_yes;
@@ -1209,10 +1251,12 @@ create_as_string(pkcs12, cert_chain_pem = "", pk = "", pass = 0, name = "PKCS12 
     croak("Error creating PKCS#12 structure\n");
   }
 
-  bio = sv_bio_create();
+  //bio = sv_bio_create(aTHX);
+  CHECK_OPEN_SSL(bio = BIO_new(BIO_s_mem()));
   i2d_PKCS12_bio(bio, p12);
 
-  RETVAL = sv_bio_final(bio);
+  //RETVAL = sv_bio_final(aTHX_ bio);
+  RETVAL = extractBioString(aTHX_ bio);
   PKCS12_free(p12);
 
   OUTPUT:
@@ -1229,14 +1273,17 @@ certificate(pkcs12, pwd = "")
 
   CODE:
 
-  bio = sv_bio_create();
+  //bio = sv_bio_create(aTHX);
+  CHECK_OPEN_SSL(bio = BIO_new(BIO_s_mem()));
 
   if ((asafes = PKCS12_unpack_authsafes(pkcs12)) == NULL)
         RETVAL = newSVpvn("",0);
 
   dump_certs_keys_p12(aTHX_ bio, pkcs12, pwd, strlen(pwd), CLCERTS|NOKEYS, NULL, NULL);
 
-  RETVAL = sv_bio_final(bio);
+  //RETVAL = sv_bio_final(aTHX_ bio);
+  RETVAL = extractBioString(aTHX_ bio);
+  //BIO_free_all(bio);
 
   OUTPUT:
   RETVAL
@@ -1251,13 +1298,15 @@ private_key(pkcs12, pwd = "")
 
   CODE:
 
-  bio = sv_bio_create();
+  //bio = sv_bio_create(aTHX);
+  CHECK_OPEN_SSL(bio = BIO_new(BIO_s_mem()));
 
   PKCS12_unpack_authsafes(pkcs12);
 
   dump_certs_keys_p12(aTHX_ bio, pkcs12, pwd, strlen(pwd), NOCERTS, NULL, NULL);
 
-  RETVAL = sv_bio_final(bio);
+  //RETVAL = sv_bio_final(aTHX_ bio);
+  RETVAL = extractBioString(aTHX_ bio);
 
   OUTPUT:
   RETVAL
@@ -1282,7 +1331,8 @@ HV* info_as_hash(pkcs12, pwd = "")
   CODE:
   RETVAL = newHV();
 
-  bio = sv_bio_create();
+  //bio = sv_bio_create(aTHX);
+  CHECK_OPEN_SSL(bio = BIO_new(BIO_s_mem()));
 
   if ((asafes = PKCS12_unpack_authsafes(pkcs12)) == NULL)
         RETVAL = newHV();
@@ -1293,7 +1343,8 @@ HV* info_as_hash(pkcs12, pwd = "")
      in future alg_print() may be needed */
   X509_ALGOR_get0(&macobj, NULL, NULL, macalgid);
   i2a_ASN1_OBJECT(bio, macobj);
-  value = sv_bio_final(bio);
+  //value = sv_bio_final(aTHX_ bio);
+  value = extractBioString(aTHX_ bio);
   if((hv_store(mac, "digest", strlen("digest"), value, 0)) == NULL)
     croak("unable to add digest to the hash");
 #else
@@ -1303,7 +1354,8 @@ HV* info_as_hash(pkcs12, pwd = "")
 
   if((hv_store(mac, "iteration", strlen("iteration"), mac_iteration, 0)) == NULL)
     croak("unable to add iteration to the hash");
-  bio = sv_bio_create();
+  //bio = sv_bio_create(aTHX);
+  CHECK_OPEN_SSL(bio = BIO_new(BIO_s_mem()));
   /* BIO_printf(bio, "MAC length: %ld, salt length: %ld", */
 #if OPENSSL_VERSION_NUMBER > 0x10100000L
   SV * mac_len = newSViv(tmac != NULL ? ASN1_STRING_length(tmac) : 0L);
@@ -1323,7 +1375,8 @@ HV* info_as_hash(pkcs12, pwd = "")
 
   dump_certs_keys_p12(aTHX_ bio, pkcs12, pwd, strlen(pwd), INFO, NULL, RETVAL);
 
-  SV * end = sv_bio_final(bio);
+  //SV * end = sv_bio_final(aTHX_ bio);
+  SV * end = extractBioString(aTHX_ bio);
 
   if (SvCUR(end) != 0)
     warn("bio from info_as_hash should be zero length - report issue");
@@ -1351,7 +1404,8 @@ info(pkcs12, pwd = "")
 #endif
   CODE:
 
-  bio = sv_bio_create();
+  //bio = sv_bio_create(aTHX);
+  CHECK_OPEN_SSL(bio = BIO_new(BIO_s_mem()));
 
   if ((asafes = PKCS12_unpack_authsafes(pkcs12)) == NULL)
         RETVAL = newSVpvn("",0);
@@ -1384,7 +1438,8 @@ info(pkcs12, pwd = "")
 #endif
   dump_certs_keys_p12(aTHX_ bio, pkcs12, pwd, strlen(pwd), INFO, NULL, NULL);
 
-  RETVAL = sv_bio_final(bio);
+  //RETVAL = sv_bio_final(aTHX_ bio);
+  RETVAL = extractBioString(aTHX_ bio);
 
   OUTPUT:
   RETVAL
