@@ -194,7 +194,7 @@ static SV* sv_bio_final(BIO *bio) {
 }
 #endif
 
-static void sv_bio_error(BIO *bio) {
+static void sv_bio_error(pTHX_ BIO *bio) {
 
   SV* sv = (SV *)BIO_get_callback_arg(bio);
   if (sv) sv_free(sv);
