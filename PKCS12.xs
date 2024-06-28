@@ -1375,11 +1375,12 @@ HV* info_as_hash(pkcs12, pwd = "")
 
   dump_certs_keys_p12(aTHX_ bio, pkcs12, pwd, strlen(pwd), INFO, NULL, RETVAL);
 
-  //SV * end = sv_bio_final(aTHX_ bio);
   SV * end = extractBioString(aTHX_ bio);
 
-  if (SvCUR(end) != 0)
-    warn("bio from info_as_hash should be zero length - report issue");
+  if (SvPOK(end)) {
+    if (SvCUR(end) != 0)
+      warn("bio from info_as_hash should be zero length - report issue");
+  }
 
   sv_2mortal((SV*)RETVAL);
 
