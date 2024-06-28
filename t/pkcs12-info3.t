@@ -127,6 +127,7 @@ my $pass   = "1234";
 my $pkcs12 = Crypt::OpenSSL::PKCS12->new_from_file('certs/test.pfx');
 
 my $info = $pkcs12->info($pass);
+diag($info);
 ok(sha256_hex($info) eq sha256_hex($openssl_output), "Output matches OpenSSL");
 
 my $info_hash = $pkcs12->info_as_hash($pass);
@@ -183,8 +184,11 @@ for (my $i = 0; $i < $pkcs7_enc_cnt; $i++) {
 
   like(@$bags[0]->{cert}, qr/CERTIFICATE/, "pkcs7_encrypted_data found certificate");
 
+
   is(keys %$bag_attributes, 1, "  Two bag attributes in bag");
   foreach my $attribute (keys %$bag_attributes) {
+      diag($attribute);
+      diag($bag_attributes->{$attribute});
         like($bag_attributes->{2.16.840.1.113894.746875.1.1}, qr/CD 93 42 14 8F 01 1B D4 CB C7 11 42 E7 32 15 DE 17 DE 39 07/, "    localKeyID matches") if $attribute eq "2.16.840.1.113894.746875.1.1";
         like($bag_attributes->{friendlyName}, qr/ssl.com ev root certification authority rsa r2/, "    friendlyName matches") if $attribute eq "friendlyName";
   }

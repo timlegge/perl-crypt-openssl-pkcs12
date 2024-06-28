@@ -604,6 +604,7 @@ int dump_certs_keys_p12(pTHX_ BIO *bio, PKCS12 *p12, char *pass, int passlen, in
 
   return 1;
 }
+#ifdef TIM
 # define B_FORMAT_TEXT   0x8000
 # define FORMAT_TEXT    (1 | B_FORMAT_TEXT)     /* Generic text */
 int FMT_istext(int format)
@@ -618,7 +619,7 @@ BIO *dup_bio_err(int format)
 
   return b;
 }
-
+#endif
 static unsigned long nmflag = 0;
 static char nmflag_set = 0;
 # define XN_FLAG_SPC_EQ          (1 << 23)/* Put spaces round '=' */
