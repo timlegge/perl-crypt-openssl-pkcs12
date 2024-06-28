@@ -781,8 +781,13 @@ void print_attribute(pTHX_ BIO *out, CONST_ASN1_TYPE *av, char **attribute)
     break;
 */
   default:
-    if(*attribute == NULL)
+    if(*attribute != NULL) {
+      Renew(*attribute, (strlen("<Unsupported tag >") + sizeof(av->type)), char);
+      sprintf(*attribute, "<Unsupported tag %i>\n", av->type);
+    }
+    else {
       BIO_printf(out, "<Unsupported tag %d>\n", av->type);
+    }
     break;
   }
 }
